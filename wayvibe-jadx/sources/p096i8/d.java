@@ -1,0 +1,28 @@
+package p096i8;
+
+import java.util.concurrent.Future;
+
+/* JADX INFO: loaded from: classes2.dex */
+public final class d {
+
+    /* JADX INFO: renamed from: a, reason: collision with root package name */
+    public long f20556a;
+
+    /* JADX INFO: renamed from: b, reason: collision with root package name */
+    public boolean f20557b;
+
+    /* JADX INFO: renamed from: c, reason: collision with root package name */
+    public Object f20558c;
+
+    /* JADX INFO: renamed from: d, reason: collision with root package name */
+    public Object f20559d;
+
+    /* JADX INFO: renamed from: e, reason: collision with root package name */
+    public Object f20560e;
+
+    /* JADX INFO: renamed from: f, reason: collision with root package name */
+    public Object f20561f;
+
+    /* JADX INFO: renamed from: g, reason: collision with root package name */
+    public Future f20562g;
+}

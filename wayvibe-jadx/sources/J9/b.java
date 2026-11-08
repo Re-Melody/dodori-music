@@ -1,0 +1,6 @@
+package J9;
+
+/* JADX INFO: loaded from: classes2.dex */
+public interface b {
+    Object b(L9.b bVar);
+}

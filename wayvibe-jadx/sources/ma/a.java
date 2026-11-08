@@ -1,0 +1,8 @@
+package ma;
+
+/* JADX INFO: loaded from: classes2.dex */
+public interface a {
+    void f(U4.c cVar);
+
+    void onFailure(Exception exc);
+}

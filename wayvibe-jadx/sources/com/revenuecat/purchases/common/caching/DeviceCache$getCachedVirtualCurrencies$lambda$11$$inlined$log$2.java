@@ -1,0 +1,29 @@
+package com.revenuecat.purchases.common.caching;
+
+import B2.AbstractC0112b;
+import Z8.a;
+import com.revenuecat.purchases.common.LogIntent;
+import com.revenuecat.purchases.strings.VirtualCurrencyStrings;
+import kotlin.jvm.internal.n;
+import p219u9.e;
+
+/* JADX INFO: loaded from: classes2.dex */
+public final class DeviceCache$getCachedVirtualCurrencies$lambda$11$$inlined$log$2 extends n implements a {
+    final /* synthetic */ e $error$inlined;
+    final /* synthetic */ LogIntent $intent;
+
+    /* JADX WARN: 'super' call moved to the top of the method (can break code semantics) */
+    public DeviceCache$getCachedVirtualCurrencies$lambda$11$$inlined$log$2(LogIntent logIntent, e eVar) {
+        super(0);
+        this.$intent = logIntent;
+        this.$error$inlined = eVar;
+    }
+
+    @Override // Z8.a
+    public final String invoke() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(N8.n.H0(this.$intent.getEmojiList(), "", null, null, null, 62));
+        sb.append(' ');
+        return AbstractC0112b.n(new Object[]{this.$error$inlined}, 1, VirtualCurrencyStrings.ERROR_DECODING_CACHED_VIRTUAL_CURRENCIES, sb);
+    }
+}

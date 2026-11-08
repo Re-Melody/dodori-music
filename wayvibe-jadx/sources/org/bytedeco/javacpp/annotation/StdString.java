@@ -1,0 +1,17 @@
+package org.bytedeco.javacpp.annotation;
+
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+/* JADX INFO: loaded from: classes2.dex */
+@Target({ElementType.METHOD, ElementType.PARAMETER})
+@Adapter("StringAdapter")
+@Cast({"std::basic_string", "&"})
+@Documented
+@Retention(RetentionPolicy.RUNTIME)
+public @interface StdString {
+    String value() default "char";
+}

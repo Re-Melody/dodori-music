@@ -1,0 +1,215 @@
+{
+  "version": 8,
+  "name": "WayVibe Light",
+  "sources": {
+    "openmaptiles": {
+      "type": "vector",
+      "url": "https://tiles.openfreemap.org/planet"
+    }
+
+  },
+  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#F4F5F0"
+      }
+    },
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#CFE3FB"
+      }
+    },
+    {
+      "id": "boundary_country",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "filter": ["==", "admin_level", 2],
+      "layout": {
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#9EB6C4",
+        "line-opacity": {
+          "stops": [[0, 0.75], [5, 0.95]]
+        },
+        "line-width": {
+          "stops": [[0, 0.4], [4, 0.8], [8, 1.4]]
+        }
+      }
+    },
+    {
+      "id": "boundary_region",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "filter": ["any", ["==", "admin_level", 3], ["==", "admin_level", 4]],
+      "minzoom": 3,
+      "layout": {
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#C4CFCA",
+        "line-opacity": {
+          "stops": [[3, 0.3], [6, 0.55], [9, 0.75]]
+        },
+        "line-width": {
+          "stops": [[3, 0.3], [6, 0.6], [9, 1.0]]
+        }
+      }
+    },
+    {
+      "id": "building",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "building",
+      "paint": {
+        "fill-color": "#E6E3DA",
+        "fill-outline-color": "#D3D0C8"
+      }
+    },
+    {
+      "id": "building_3d",
+      "type": "fill-extrusion",
+      "source": "openmaptiles",
+      "source-layer": "building",
+      "paint": {
+        "fill-extrusion-color": "#DDD8CF",
+        "fill-extrusion-height": ["coalesce", ["get", "render_height"], ["get", "height"], 0],
+        "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], ["get", "min_height"], 0],
+        "fill-extrusion-opacity": 0.6
+      }
+    },
+    {
+      "id": "road_minor",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": ["all", ["!=", "class", "motorway"], ["!=", "class", "trunk"], ["!=", "class", "primary"], ["!=", "class", "secondary"]],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#D8D5CD",
+        "line-width": {
+          "stops": [[12, 0.5], [16, 2]]
+        }
+      }
+    },
+    {
+      "id": "road_major",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": ["any", ["==", "class", "motorway"], ["==", "class", "trunk"], ["==", "class", "primary"], ["==", "class", "secondary"]],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#B6C89E",
+        "line-width": {
+          "stops": [[10, 1], [16, 4]]
+        }
+      }
+    },
+    {
+      "id": "country_label",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "filter": ["==", "class", "country"],
+      "minzoom": 1,
+      "layout": {
+        "text-field": [
+          "case",
+          [
+            "any",
+            ["==", ["to-string", ["get", "iso_a2"]], "IL"],
+            ["==", ["to-string", ["get", "name:latin"]], "Israel"],
+            ["==", ["to-string", ["get", "name:latin"]], "State of Israel"],
+            ["==", ["to-string", ["get", "name:en"]], "Israel"],
+            ["==", ["to-string", ["get", "name"]], "Israel"],
+            ["==", ["to-string", ["get", "name"]], "ישראל"],
+            ["==", ["to-string", ["get", "name"]], "מדינת ישראל"]
+          ],
+          "Palestine",
+          ["coalesce", ["get", "name:latin"], ["get", "name"]]
+        ],
+        "text-font": ["literal", ["Noto Sans Regular"]],
+        "text-size": {
+          "stops": [[1, 11], [3, 13], [5, 16]]
+        },
+        "text-letter-spacing": 0.08
+      },
+      "paint": {
+        "text-color": "#40505B",
+        "text-halo-color": "#F4F5F0",
+        "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "place_label",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "filter": [
+        "any",
+        ["==", "class", "state"],
+        ["==", "class", "city"],
+        ["==", "class", "town"]
+      ],
+      "minzoom": 4,
+      "layout": {
+        "text-field": [
+          "match",
+          ["to-string", ["coalesce", ["get", "name:latin"], ["get", "name:en"], ["get", "name"], ""]],
+          ["Tel Aviv", "Tel Aviv-Yafo", "Tel Aviv-Jaffa", "Tel-Aviv", "Tel-Aviv-Yafo", "Tel-Aviv-Jaffa", "תל אביב", "תל אביב - יפו", "תל־אביב–יפו", "תל־אביב"], "Yafa (Jaffa)",
+          ["Jerusalem", "ירושלים"], "Jerusalem (Al-Quds)",
+          ["Akko", "Acre", "עכו"], "Akka",
+          ["Nazareth", "Nazerat", "נצרת"], "Al-Nasira",
+          ["Be'er Sheva", "Beersheba", "באר שבע"], "Bir al-Saba",
+          ["Ashkelon", "אשקלון"], "Al-Majdal",
+          ["Ashdod", "אשדוד"], "Isdud",
+          ["Tiberias", "Tverya", "טבריה"], "Tabariyya",
+          ["Safed", "Tzfat", "צפת"], "Safad",
+          ["Beit She'an", "בית שאן"], "Baysan",
+          ["Lod", "לוד"], "Al-Lydd",
+          ["Ramla", "רמלה"], "Al-Ramla",
+          ["Kiryat Shmona", "Qiryat Shemona", "קריית שמונה"], "Al-Khalisa",
+          ["Netanya", "נתניה"], "Umm Khalid",
+          ["Eilat", "אילת"], "Umm al-Rashrash",
+          ["Herzliya", "הרצליה"], "Al-Haram",
+          ["Petah Tikva", "פתח תקווה"], "Mlabis",
+          ["Hadera", "חדרה"], "Al-Khudayra",
+          ["Rishon LeZion", "ראשון לציון"], "Ein Qara",
+          ["Afula", "עפולה"], "Al-Fula",
+          ["Kfar Saba", "כפר סבא"], "Kafr Saba",
+          ["Modi'in-Maccabim-Re'ut", "Modi'in", "מודיעין"], "Al-Midya",
+          ["Nahariya", "נהריה"], "Al-Zib",
+          ["Rehovot", "רחובות"], "Zarnuqa",
+          ["West Bank"], "Palestine",
+          ["Israel", "State of Israel", "ישראל", "מדינת ישראל"], "Palestine",
+          ["coalesce", ["get", "name:latin"], ["get", "name"]]
+        ],
+        "text-font": ["literal", ["Noto Sans Regular"]],
+        "text-size": {
+          "stops": [[4, 10], [8, 12], [12, 14]]
+        }
+      },
+      "paint": {
+        "text-color": "#596962",
+        "text-halo-color": "#F4F5F0",
+        "text-halo-width": 1.5
+      }
+    }
+  ]
+}

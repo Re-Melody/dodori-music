@@ -1,0 +1,8 @@
+package p199t;
+
+/* JADX INFO: loaded from: classes.dex */
+public abstract class C {
+
+    /* JADX INFO: renamed from: a, reason: collision with root package name */
+    public static final v f26262a = new v(0);
+}

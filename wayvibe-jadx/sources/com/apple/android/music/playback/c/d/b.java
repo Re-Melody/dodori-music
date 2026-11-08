@@ -1,0 +1,10 @@
+package com.apple.android.music.playback.c.d;
+
+/* JADX INFO: loaded from: classes.dex */
+public interface b {
+    String a();
+
+    String b();
+
+    byte[] c();
+}
