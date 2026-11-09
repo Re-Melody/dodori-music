@@ -6,6 +6,11 @@ import android.os.Looper
 
 class MusicMapApplication : Application() {
     val state = AppState()
+    override fun onCreate() {
+        super.onCreate()
+        state.favorites = getSharedPreferences("music-map", MODE_PRIVATE)
+            .getStringSet("favorites", emptySet())!!.toSet()
+    }
 }
 
 class AppState {

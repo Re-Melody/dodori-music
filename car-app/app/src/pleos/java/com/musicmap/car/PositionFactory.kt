@@ -1,11 +1,19 @@
 package com.musicmap.car
 
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
 import ai.pleos.playground.location.fused.FusedLocation
 import ai.pleos.playground.location.fused.listener.FusedLocationListener
 import ai.pleos.playground.location.fused.model.LocationData
 
 fun createPositionSource(context: Context): PositionSource = PleosPositionSource(context)
+private const val PLEOS_LOCATION_PERMISSION = "pleos.car.permission.FUSED_LOCATION"
+fun positionPermissions(): Array<String> = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION, PLEOS_LOCATION_PERMISSION)
+fun hasPositionPermission(context: Context): Boolean =
+    context.checkSelfPermission(PLEOS_LOCATION_PERMISSION) == PackageManager.PERMISSION_GRANTED &&
+        (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED)
 
 /** Typed integration with the official FusedLocation 1.1.3 API; no reflection or fabricated GPS. */
 class PleosPositionSource(context: Context) : PositionSource {

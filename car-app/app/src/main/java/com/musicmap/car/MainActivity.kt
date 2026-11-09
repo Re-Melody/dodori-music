@@ -88,15 +88,14 @@ class MainActivity : Activity() {
         startForegroundService(intent)
     }
     private fun liveLocation() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 10)
+        if (!hasPositionPermission(this))
+            requestPermissions(positionPermissions(), 10)
         else command("live")
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 10) {
-            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) command("live")
+            if (hasPositionPermission(this)) command("live")
             else Toast.makeText(this, "위치 권한 없이도 시연 경로를 사용할 수 있어요", Toast.LENGTH_LONG).show()
         }
     }

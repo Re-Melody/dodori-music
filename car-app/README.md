@@ -12,7 +12,7 @@ RoadyGoat의 지역 추천·지도 표현을 참고해 필요한 동작을 새�
 - 지역 변경 시 현재 곡을 보존하고 다음 재생 목록만 교체
 - 창작 시연곡 6개 오프라인 재생, 일시정지, 이전·다음, 자동 다음 곡
 - Android MediaBrowserService / MediaSession을 통한 탐색·시스템 재생 제어·검색 재생
-- 포그라운드 서비스, 미디어 알림, 오디오 포커스, 다른 오디오에 의한 일시정지 처리
+- 포그라운드 서비스, 미디어 알림, 오디오 포커스, 일시정지·내비 안내 중 음량 감쇄 처리
 - 즐겨찾기 로컬 저장, 장르 필터
 - AAOS CarUxRestrictions 수신: 제한 활성화 또는 상태 확인 실패 시 목록·필터·지도 조작 제한
 - 일반 Android 위치와 Pleos FusedLocation을 소스 세트로 분리
@@ -77,6 +77,8 @@ python tools/smoke_test.py --adb PATH_TO_ADB
 재실행 전 해당 에뮬레이터의 앱 데이터는 `adb shell pm clear com.musicmap.car`로 초기화합니다.
 실행 결과: `build/verification/smoke-result.txt`.
 검증 요약과 남은 범위는 [검증 기록](docs/VALIDATION.md)을 참고합니다.
+차량 연동 관점의 확장 검사(시스템 정지·재시작 보관함·큐·오디오 포커스·화면 재생성·권한 거부)는
+[2026-11-09 QA 보고서](docs/QA-2026-11-09.md)와 `tools/vehicle_qa.py`를 참고합니다.
 
 ## 구조
 
