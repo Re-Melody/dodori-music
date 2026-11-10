@@ -25,7 +25,7 @@ RoadyGoat의 지역 추천·지도 표현을 참고해 필요한 동작을 새�
 
 ## 실행
 
-일반 Android 에뮬레이터를 자동으로 켜고 빌드·설치·실행하려면 PowerShell에서:
+Pleos Connect 에뮬레이터를 자동으로 켜고 `pleosDebug`를 빌드·설치·실행하려면 PowerShell에서:
 
 ```powershell
 cd C:\Users\user\OneDrive\dodori-music\car-app
@@ -33,9 +33,10 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
 `No connected devices`는 빌드 코드 오류가 아니라 설치 대상이 없는 상태입니다.
-위 스크립트는 설치된 AVD를 실행하고 Android 부팅 완료를 기다립니다.
-기기가 여러 개면 `-Serial emulator-5554`, 특정 AVD는 `-Avd Pixel_2`로 선택합니다.
-Pleos에서는 해당 에뮬레이터를 먼저 켜고 `-Variant pleos`를 추가합니다.
+위 스크립트는 Pleos 시스템 이미지를 사용하는 AVD를 찾아 Cold boot로 실행하고 부팅 완료를 기다립니다.
+기기가 여러 개면 `-Serial emulator-5554`, 특정 AVD는 `-Avd Pleos_Connect_2_1_0`으로 선택합니다.
+일반 Android에서 확인하려면 `-Variant standard -Avd Pixel_2`를 지정합니다.
+Pleos 설치와 점검 절차는 [Pleos 실행 가이드](docs/PLEOS.md)를 참고합니다.
 
 Android Studio에서 **이 car-app 폴더**를 프로젝트로 엽니다.
 JDK 17 이상(검증 환경 JDK 21), Android SDK 34, 인터넷이 필요합니다.
@@ -97,7 +98,8 @@ python tools/smoke_test.py --adb PATH_TO_ADB
 
 ## 대회 제출까지 남은 작업
 
-1. Pleos 2.1.0 에뮬레이터와 실제 차량에서 위치·미디어 센터·주행 제한을 검증합니다.
+1. Pleos 2.1.0 에뮬레이터에서 미디어 동작 42개 검사와 FusedLocation 가상 위치 수신을 확인했습니다([기록](docs/VALIDATION.md)).
+   기본 미디어 앱 통합, 주행 상태 전환, suspend/resume 및 실제 차량 검증을 이어갑니다.
 2. Pleos Workspace에서 사용할 SDK의 현재 제공 상태와 권한을 확인합니다.
    FusedLocation 코드가 컴파일된다는 사실만으로 차량 위치 접근 승인·실행을 보장하지 않습니다.
 3. 음원 공급 방식과 사용 권한을 확정하고 시연 카탈로그를 실제 지역·음악 데이터로 교체합니다.
