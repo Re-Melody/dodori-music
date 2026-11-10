@@ -1,5 +1,47 @@
 # 검증 기록
 
+## 2026-11-10 Pleos Connect 실행 검증 (KST)
+
+- 공식 Pleos Connect 2.1.0 / API 34 / x86_64 이미지를 설치하고 `Pleos_Connect_2_1_0` AVD를 생성했다.
+- 공식 저장소의 이미지 SHA-1 `b4f858d5bcc6c71506d7edfc872bcb9e5a11acaa` 대조 완료.
+- 2560×1440 / 160 dpi, RAM 4 GB, Hardware GPU, Cold boot. Windows WHPX 가속 사용.
+- `assemblePleosDebug`, `assemblePleosDebugAndroidTest` 성공. `run.ps1`의 기본 실행으로 AVD 부팅·설치·Activity 실행 성공.
+- 차량의 현재 사용자 ID는 `10`이었다. 테스트와 위치 권한은 해당 사용자에게 적용했다.
+- 기존 계측 테스트 중 일반 Android 테스트 GPS를 사용하는 `smoke`는 제외하고 다음 6개 suite를 Pleos APK에서 실행했다.
+
+| Suite | 통과 항목 수 |
+|---|---:|
+| system-stop | 4 |
+| queue | 5 |
+| media | 14 |
+| lifecycle | 6 |
+| permissions | 3 |
+| focus | 10 |
+| 합계 | 42 |
+
+원본 실행 로그: `build/verification/pleos/` (생성 파일, Git 제외).
+계측 테스트 진입점은 `com.musicmap.car.test/com.musicmap.car.SmokeInstrumentation`이며 `-e suite NAME`으로 선택했다.
+이 검사는 앱의 MediaBrowser/MediaController와 재생 상태를 검사한다. Pleos 기본 미디어 앱의 수동 탐색, 실제 스피커 음질과 물리 버튼 검증은 포함하지 않는다.
+
+### Pleos 위치 SDK
+
+- 사용자 10에 Android 위치 권한과 `pleos.car.permission.FUSED_LOCATION`을 부여했다.
+- 공식 FusedLocation 서비스 연결 로그의 `ServiceConnected call`과 앱 화면의 `Pleos 차량 위치 · 실시간 수신`을 확인했다.
+- 초기 에뮬레이터 좌표(Mountain View)를 수신한 뒤 `adb -s emulator-5554 emu geo fix 126.9780 37.5665`로 가상 GPS를 서울로 변경했다.
+- Pleos SDK 콜백을 통해 지도가 서울로 이동하고 서울 추천 2곡이 표시되는 것을 확인했다. 시연 경로를 켜지 않은 상태였고 자동 재생하지 않았다.
+- 에뮬레이터 가상 GPS → Pleos FusedLocation → 앱 화면 경로를 확인한 결과이며, 실차 GPS 검증은 아니다.
+
+![Pleos 차량 화면에서 서울 가상 위치 수신](pleos-location.png)
+
+[재생 검사 중 화면](pleos-emulator.png).
+
+### 남은 범위와 관찰 사항
+
+- 현재 Activity의 세로 고정 설정 때문에 Pleos 화면에서 앱 양옆에 검은 여백이 생긴다. 차량 화면에 맞는 UI 조정은 별도 작업이다.
+- GPU는 GTX 1050 Ti 4 GB로 공식 최소 사양보다 낮지만, 이번 부팅·화면 표시·검사는 완료했다. 장시간 성능은 검증하지 않았다.
+- 실제 주행 상태 전환에 따른 UX 제한, 차량 suspend/resume, 물리 입력, 실차 및 배포용 SDK 사용 승인은 미검증이다.
+- 아래 2026-11-08~09의 미검증 표기는 해당 날짜의 상태다. 최신 에뮬레이터 및 위치 콜백 결과는 이 절을 기준으로 한다.
+
 ## 2026-11-09 차량 연동 관점 재검증 (KST)
 
 - 일반 Android / Pleos 빌드 및 lint 재검증 성공, 각 lint 오류 0개·경고 18개.
