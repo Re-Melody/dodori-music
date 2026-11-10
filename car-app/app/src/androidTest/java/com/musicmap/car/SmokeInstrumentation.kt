@@ -16,8 +16,14 @@ import java.util.concurrent.TimeUnit
 
 /** Tests a real Android service/player, without screenshot-coordinate coupling. */
 class SmokeInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var suite = "smoke"
+    override fun onCreate(arguments: Bundle?) {
+        super.onCreate(arguments)
+        suite = arguments?.getString("suite") ?: "smoke"
+        start()
+    }
     override fun onStart() {
+        if (suite != "smoke") { VehicleQa(this).run(suite); return }
         val passed = mutableListOf<String>()
         var browser: MediaBrowser? = null
         var mockManager: LocationManager? = null

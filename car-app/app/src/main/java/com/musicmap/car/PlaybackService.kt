@@ -1,9 +1,7 @@
 package com.musicmap.car
 
-import android.Manifest
 import android.app.*
 import android.content.*
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.*
 import android.media.browse.MediaBrowser
@@ -22,10 +20,12 @@ class PlaybackService : MediaBrowserService() {
     private var ready = false
     private var desiredPlay = false
     private var resumeOnGain = false
+    private var ducked = false
     private var queue = emptyList<Track>()
     private var index = -1
     private var locationSource: PositionSource? = null
     private var foreground = false
+    private var stopped = false
     private val preferences by lazy { getSharedPreferences("music-map", MODE_PRIVATE) }
     private val tick = object : Runnable {
         override fun run() {
@@ -49,10 +49,16 @@ class PlaybackService : MediaBrowserService() {
             .setOnAudioFocusChangeListener { change ->
                 when (change) {
                     AudioManager.AUDIOFOCUS_LOSS -> { pause(); session.isActive = false }
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                         resumeOnGain = desiredPlay; pause(abandon = false)
                     }
-                    AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnGain) { resumeOnGain = false; play() }
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                        ducked = true; player?.setVolume(.2f, .2f)
+                    }
+                    AudioManager.AUDIOFOCUS_GAIN -> {
+                        ducked = false; player?.setVolume(1f, 1f)
+                        if (resumeOnGain) { resumeOnGain = false; play() }
+                    }
                 }
             }.build()
         session = MediaSession(this, "MusicMap").apply {
@@ -60,7 +66,7 @@ class PlaybackService : MediaBrowserService() {
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() { ensureForeground(); play() }
                 override fun onPause() { pause() }
-                override fun onStop() { stopPlayback() }
+                override fun onStop() { stopAll() }
                 override fun onSkipToNext() { skip(1) }
                 override fun onSkipToPrevious() { skip(-1) }
                 override fun onSeekTo(pos: Long) { if (ready) player?.seekTo(pos.toInt().coerceIn(0, state.durationMs)) }
@@ -69,7 +75,7 @@ class PlaybackService : MediaBrowserService() {
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
                     val matches = Catalog.tracks.filter { query.isNullOrBlank() || "${it.title} ${it.artist} ${it.genre}".contains(query, true) }
-                    matches.firstOrNull()?.let { ensureForeground(); queue = matches; index = 0; load(it, true) }
+                    matches.firstOrNull()?.let { ensureForeground(); queue = matches; index = 0; publishQueue(); load(it, true) }
                 }
             })
             setSessionActivity(PendingIntent.getActivity(this@PlaybackService, 0, Intent(this@PlaybackService, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
@@ -109,7 +115,7 @@ class PlaybackService : MediaBrowserService() {
             "play" -> if (state.playing) pause() else play()
             "next" -> skip(1)
             "previous" -> skip(-1)
-            "stop" -> { stopPlayback(); stopPosition(); stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf() }
+            "stop" -> stopAll()
             "select" -> Catalog.tracks.find { it.id == intent.getStringExtra("id") }?.let(::select)
             "demo" -> {
                 stopPosition(); state.demoProgress = 0.0; state.demo = true
@@ -148,16 +154,19 @@ class PlaybackService : MediaBrowserService() {
         state.recommendations = Catalog.recommend(state.region?.id, state.genre)
         queue = Catalog.queueFor(state.current, state.recommendations)
         index = if (state.current == null) -1 else 0
-        session.setQueue(queue.mapIndexed { i, track -> MediaSession.QueueItem(mediaItem(track).description, i.toLong()) })
+        publishQueue()
         notifyChildrenChanged("nearby")
+    }
+    private fun publishQueue() {
+        session.setQueue(queue.mapIndexed { i, track -> MediaSession.QueueItem(mediaItem(track).description, i.toLong()) })
     }
     private fun select(track: Track) {
         queue = (if (track in state.recommendations) state.recommendations else Catalog.tracks)
-        index = queue.indexOf(track); load(track, true)
+        index = queue.indexOf(track); publishQueue(); load(track, true)
     }
     private fun load(track: Track, autoplay: Boolean) {
         player?.release(); ready = false; desiredPlay = autoplay
-        state.current = track; state.playing = false; state.positionMs = 0
+        stopped = false; state.current = track; state.playing = false; state.positionMs = 0
         val created = MediaPlayer()
         player = created
         try {
@@ -187,6 +196,7 @@ class PlaybackService : MediaBrowserService() {
         publish()
     }
     private fun play() {
+        stopped = false
         if (state.current == null) {
             state.recommendations.firstOrNull()?.let(::select) ?: run { state.message = "먼저 시연 경로나 현재 위치를 선택해 주세요"; publish() }
             return
@@ -195,7 +205,9 @@ class PlaybackService : MediaBrowserService() {
         if (player == null) { state.current?.let { load(it, true) }; return }
         if (!ready) return
         if (audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            session.isActive = true; player?.start(); state.playing = true
+            session.isActive = true
+            val volume = if (ducked) .2f else 1f
+            player?.setVolume(volume, volume); player?.start(); state.playing = true
         } else { desiredPlay = false; state.message = "다른 오디오 사용이 끝난 뒤 재생해 주세요" }
         publish()
     }
@@ -203,12 +215,19 @@ class PlaybackService : MediaBrowserService() {
         desiredPlay = false
         if (ready) player?.pause()
         state.playing = false
-        if (abandon) { resumeOnGain = false; audio.abandonAudioFocusRequest(focus) }
+        if (abandon) {
+            resumeOnGain = false; ducked = false; player?.setVolume(1f, 1f)
+            audio.abandonAudioFocusRequest(focus)
+        }
         publish()
     }
     private fun stopPlayback() {
         pause(); player?.release(); player = null; ready = false
-        state.positionMs = 0; session.isActive = false; publish()
+        stopped = true; state.positionMs = 0; session.isActive = false; publish()
+    }
+    private fun stopAll() {
+        stopPlayback(); stopPosition(); state.source = "위치 수신 중지"
+        stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf(); publish()
     }
     private fun skip(direction: Int) {
         if (direction < 0 && ready && (player?.currentPosition ?: 0) > 3000) { player?.seekTo(0); return }
@@ -218,8 +237,7 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun startPosition() {
         stopPosition(); state.demo = false; state.point = null; state.region = null; refreshRecommendations()
-        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (!hasPositionPermission(this)) {
             state.source = "위치 권한 필요"; return
         }
         locationSource = createPositionSource(this)
@@ -229,12 +247,13 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun stopPosition() { locationSource?.stop(); locationSource = null; state.demo = false }
     private fun publish() {
-        val playbackState = if (state.playing) PlaybackState.STATE_PLAYING else if (state.current == null) PlaybackState.STATE_NONE else PlaybackState.STATE_PAUSED
+        val playbackState = if (state.playing) PlaybackState.STATE_PLAYING else if (stopped) PlaybackState.STATE_STOPPED else if (state.current == null) PlaybackState.STATE_NONE else PlaybackState.STATE_PAUSED
         session.setPlaybackState(PlaybackState.Builder().setActions(
             PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP or
                 PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
                 PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or PlaybackState.ACTION_SEEK_TO)
-            .setState(playbackState, state.positionMs.toLong(), if (state.playing) 1f else 0f).build())
+            .setState(playbackState, state.positionMs.toLong(), if (state.playing) 1f else 0f)
+            .setActiveQueueItemId(if (index in queue.indices) index.toLong() else MediaSession.QueueItem.UNKNOWN_ID.toLong()).build())
         state.changed()
         if (foreground) getSystemService(NotificationManager::class.java).notify(1, notification())
     }
