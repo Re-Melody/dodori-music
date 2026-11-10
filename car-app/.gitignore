@@ -5,3 +5,6 @@
 /local.properties
 *.jks
 *.keystore
+/app/libs/musickit/*.aar
+/app/libs/musickit/*.jar
+*.p8

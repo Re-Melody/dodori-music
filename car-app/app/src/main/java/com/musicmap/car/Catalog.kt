@@ -5,7 +5,8 @@ import kotlin.math.*
 data class GeoPoint(val lat: Double, val lon: Double)
 data class MusicRegion(val id: String, val name: String, val point: GeoPoint, val radiusKm: Double)
 data class Track(val id: String, val title: String, val artist: String, val regionId: String,
-                 val genre: String, val reason: String, val asset: String)
+                 val genre: String, val reason: String, val asset: String,
+                 val appleMusicId: String? = null, val durationMs: Int = 0)
 
 object Catalog {
     val regions = listOf(

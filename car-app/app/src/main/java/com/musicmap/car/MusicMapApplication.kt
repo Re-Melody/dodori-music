@@ -6,6 +6,7 @@ import android.os.Looper
 
 class MusicMapApplication : Application() {
     val state = AppState()
+    val appleMusic by lazy { AppleMusicRepository(this) }
     override fun onCreate() {
         super.onCreate()
         state.favorites = getSharedPreferences("music-map", MODE_PRIVATE)
@@ -14,12 +15,14 @@ class MusicMapApplication : Application() {
 }
 
 class AppState {
+    var appleTracks = emptyList<Track>()
     var point: GeoPoint? = null
     var region: MusicRegion? = null
     var genre = "전체"
     var recommendations = emptyList<Track>()
     var current: Track? = null
     var playing = false
+    var buffering = false
     var positionMs = 0
     var durationMs = 1
     var demo = false

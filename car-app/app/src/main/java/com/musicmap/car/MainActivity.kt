@@ -234,14 +234,17 @@ class MainActivity : Activity() {
             isFocusable = true; contentDescription = "재생 화면 열기"; setOnClickListener { showPlayer() }
         }
     }
-    private fun navItems() = listOf("탐색" to Icon.EXPLORE, "보관함" to Icon.LIBRARY).mapIndexed { index, (label, icon) ->
+    private fun navItems() = listOf("탐색" to Icon.EXPLORE, "보관함" to Icon.LIBRARY, "Apple Music" to Icon.NOTE).mapIndexed { index, (label, icon) ->
         Button(this).apply {
             text = label; isAllCaps = false; textSize = 12f * s
             minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
             stateListAnimator = null; elevation = 0f; gravity = Gravity.CENTER; setPadding(0, u(8f), 0, u(8f))
             setCompoundDrawables(null, IconDrawable(icon, Ui.TEXT_MUTED).apply { setBounds(0, 0, u(26f), u(26f)) }, null, null)
             compoundDrawablePadding = u(6f)
-            setOnClickListener { favoritesOnly = index == 1; renderedList = ""; render(); listScroll.smoothScrollTo(0, 0) }
+            setOnClickListener {
+                if (index == 2) startActivity(Intent(this@MainActivity, AppleMusicActivity::class.java))
+                else { favoritesOnly = index == 1; renderedList = ""; render(); listScroll.smoothScrollTo(0, 0) }
+            }
             parkedControls.add(this)
         }
     }
@@ -383,7 +386,7 @@ class MainActivity : Activity() {
         if (!wide) pageSubtitle.text = if (favoritesOnly) "저장한 곡을 한곳에서 다시 들어보세요." else "지금 있는 곳에서, 새로운 음악을 만나세요."
         listTitle.text = if (favoritesOnly) "저장한 음악" else "이곳의 사운드"
         navButtons.forEachIndexed { i, b ->
-            val active = favoritesOnly == (i == 1)
+            val active = i < 2 && favoritesOnly == (i == 1)
             val color = if (active) Ui.TEXT else Ui.TEXT_MUTED
             b.setTextColor(color); b.typeface = weight(if (active) 700 else 400)
             (b.compoundDrawables[1] as? IconDrawable)?.color = color
@@ -420,17 +423,17 @@ class MainActivity : Activity() {
             nowArt.addView(if (current == null) View(this).apply { background = shape(Ui.RAISED, 4f) } else albumArt(Catalog.tracks.indexOf(current)), FrameLayout.LayoutParams(-1, -1))
         }
         currentText.text = current?.title ?: "오늘의 첫 곡을 찾아보세요"
-        detailText.text = current?.let { "${it.artist} · ${it.genre}" } ?: "음악을 선택하면 여기에 표시돼요"
+        detailText.text = current?.let { if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · ${it.genre}" } ?: "음악을 선택하면 여기에 표시돼요"
         listOfNotNull(playButton, dialogPlay).forEach {
-            (it.drawable as? IconDrawable)?.icon = if (state.playing) Icon.PAUSE else Icon.PLAY
-            it.contentDescription = if (state.playing) "일시정지" else "재생"
+            (it.drawable as? IconDrawable)?.icon = if (state.playing || state.buffering) Icon.PAUSE else Icon.PLAY
+            it.contentDescription = if (state.playing || state.buffering) "일시정지" else "재생"
         }
         dialogTitle?.text = current?.title ?: "음악을 선택해 주세요"
         val saved = current?.id in state.favorites
         favorite.text = if (saved) "저장됨" else "저장"
         (favorite.compoundDrawables[0] as? IconDrawable)?.let { it.icon = if (saved) Icon.HEART_FILLED else Icon.HEART; it.color = if (saved) Ui.ACCENT else Ui.TEXT }
         favorite.contentDescription = if (saved) "보관함에 저장됨" else "보관함에 저장"
-        favorite.isEnabled = current != null && !restricted
+        favorite.isEnabled = current != null && current.appleMusicId == null && !current.id.startsWith("apple:") && !restricted
         favorite.alpha = if (favorite.isEnabled) 1f else .4f
         progress.progress = (1000L * state.positionMs / state.durationMs.coerceAtLeast(1)).toInt()
         fun clock(ms: Int) = "%d:%02d".format(ms / 60000, ms / 1000 % 60)

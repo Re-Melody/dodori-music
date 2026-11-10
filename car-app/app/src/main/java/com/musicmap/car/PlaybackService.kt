@@ -17,6 +17,9 @@ class PlaybackService : MediaBrowserService() {
     private lateinit var audio: AudioManager
     private lateinit var focus: AudioFocusRequest
     private var player: MediaPlayer? = null
+    private val appleMusic get() = (application as MusicMapApplication).appleMusic
+    private var applePlayer: MusicKitBridge.NativePlayer? = null
+    private var appleGeneration = 0
     private var ready = false
     private var desiredPlay = false
     private var resumeOnGain = false
@@ -35,6 +38,7 @@ class PlaybackService : MediaBrowserService() {
                 if (state.demoProgress >= 1.0) { state.demo = false; state.source = "시연 경로 도착" }
             }
             if (ready) player?.let { state.positionMs = it.currentPosition; state.durationMs = it.duration }
+            if (applePlayer != null) syncApplePlayback()
             publish()
             handler.postDelayed(this, 1000)
         }
@@ -53,7 +57,8 @@ class PlaybackService : MediaBrowserService() {
                         resumeOnGain = desiredPlay; pause(abandon = false)
                     }
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                        ducked = true; player?.setVolume(.2f, .2f)
+                        if (applePlayer != null) { resumeOnGain = desiredPlay; pause(abandon = false) }
+                        else { ducked = true; player?.setVolume(.2f, .2f) }
                     }
                     AudioManager.AUDIOFOCUS_GAIN -> {
                         ducked = false; player?.setVolume(1f, 1f)
@@ -69,12 +74,15 @@ class PlaybackService : MediaBrowserService() {
                 override fun onStop() { stopAll() }
                 override fun onSkipToNext() { skip(1) }
                 override fun onSkipToPrevious() { skip(-1) }
-                override fun onSeekTo(pos: Long) { if (ready) player?.seekTo(pos.toInt().coerceIn(0, state.durationMs)) }
+                override fun onSeekTo(pos: Long) {
+                    if (applePlayer != null) appleAction { it.seek(pos.coerceIn(0, state.durationMs.toLong())) }
+                    else if (ready) player?.seekTo(pos.toInt().coerceIn(0, state.durationMs))
+                }
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    Catalog.tracks.find { it.id == mediaId }?.let { ensureForeground(); select(it) }
+                    findTrack(mediaId)?.let { ensureForeground(); select(it) }
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
-                    val matches = Catalog.tracks.filter { query.isNullOrBlank() || "${it.title} ${it.artist} ${it.genre}".contains(query, true) }
+                    val matches = (Catalog.tracks + state.appleTracks).filter { query.isNullOrBlank() || "${it.title} ${it.artist} ${it.genre}".contains(query, true) }
                     matches.firstOrNull()?.let { ensureForeground(); queue = matches; index = 0; publishQueue(); load(it, true) }
                 }
             })
@@ -95,7 +103,8 @@ class PlaybackService : MediaBrowserService() {
     override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaBrowser.MediaItem>>) {
         val items = when (parentId) {
             "root" -> listOf(folder("music", "음악"))
-            "music" -> listOf(folder("nearby", "현재 지역 추천"), folder("favorites", "즐겨찾기"), folder("all", "전체 시연곡"))
+            "music" -> listOf(folder("nearby", "현재 지역 추천"), folder("favorites", "즐겨찾기"), folder("all", "전체 시연곡"), folder("apple", "Apple Music · 선택한 목록"))
+            "apple" -> if (appleMusic.connected) state.appleTracks.map(::mediaItem) else emptyList()
             "nearby" -> state.recommendations.map(::mediaItem)
             "favorites" -> Catalog.tracks.filter { it.id in state.favorites }.map(::mediaItem)
             "all" -> Catalog.tracks.map(::mediaItem)
@@ -112,11 +121,20 @@ class PlaybackService : MediaBrowserService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureForeground()
         when (intent?.action) {
-            "play" -> if (state.playing) pause() else play()
+            "play" -> if (state.playing || state.buffering) pause() else play()
             "next" -> skip(1)
             "previous" -> skip(-1)
             "stop" -> stopAll()
-            "select" -> Catalog.tracks.find { it.id == intent.getStringExtra("id") }?.let(::select)
+            "select" -> findTrack(intent.getStringExtra("id"))?.let(::select)
+            "apple_disconnect" -> {
+                if (state.current?.appleMusicId != null) {
+                    stopPlayback(); state.current = null; queue = emptyList(); index = -1; publishQueue()
+                    session.setMetadata(null)
+                    state.message = "Apple Music 연결을 해제했어요"
+                    if (locationSource == null && !state.demo) stopAll()
+                }
+                notifyChildrenChanged("apple")
+            }
             "demo" -> {
                 stopPosition(); state.demoProgress = 0.0; state.demo = true
                 ensureForeground()
@@ -152,6 +170,9 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun refreshRecommendations() {
         state.recommendations = Catalog.recommend(state.region?.id, state.genre)
+        if (state.current?.appleMusicId != null) {
+            notifyChildrenChanged("nearby"); return
+        }
         queue = Catalog.queueFor(state.current, state.recommendations)
         index = if (state.current == null) -1 else 0
         publishQueue()
@@ -161,12 +182,20 @@ class PlaybackService : MediaBrowserService() {
         session.setQueue(queue.mapIndexed { i, track -> MediaSession.QueueItem(mediaItem(track).description, i.toLong()) })
     }
     private fun select(track: Track) {
-        queue = (if (track in state.recommendations) state.recommendations else Catalog.tracks)
+        queue = if (track.appleMusicId != null) state.appleTracks.ifEmpty { listOf(track) }
+            else if (track in state.recommendations) state.recommendations else Catalog.tracks
+        if (track !in queue) queue = listOf(track)
         index = queue.indexOf(track); publishQueue(); load(track, true)
+        notifyChildrenChanged("apple")
     }
+    private fun findTrack(id: String?): Track? = (Catalog.tracks.find { it.id == id }
+        ?: state.appleTracks.find { it.id == id } ?: id?.let { appleMusic.find(it) })
+        ?.takeIf { !it.id.startsWith("apple:") || it.appleMusicId != null }
     private fun load(track: Track, autoplay: Boolean) {
+        if (track.appleMusicId != null) { loadApple(track, autoplay); return }
+        releaseApplePlayer()
         player?.release(); ready = false; desiredPlay = autoplay
-        stopped = false; state.current = track; state.playing = false; state.positionMs = 0
+        stopped = false; state.current = track; state.playing = false; state.buffering = true; state.positionMs = 0
         val created = MediaPlayer()
         player = created
         try {
@@ -175,25 +204,78 @@ class PlaybackService : MediaBrowserService() {
             assets.openFd("audio/${track.asset}").use { created.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
             created.setOnPreparedListener {
                 if (player !== it) return@setOnPreparedListener
-                ready = true; state.durationMs = it.duration
+                ready = true; state.buffering = false; state.durationMs = it.duration
                 session.setMetadata(MediaMetadata.Builder(session.controller.metadata)
                     .putLong(MediaMetadata.METADATA_KEY_DURATION, it.duration.toLong()).build())
                 if (desiredPlay) play() else publish()
             }
             created.setOnCompletionListener { skip(1) }
             created.setOnErrorListener { _, _, _ ->
-                ready = false; desiredPlay = false; state.playing = false
+                ready = false; desiredPlay = false; state.playing = false; state.buffering = false
                 state.message = "재생 실패 · 다른 곡을 선택해 주세요"; publish(); true
             }
             created.prepareAsync()
         } catch (e: Exception) {
-            created.release(); player = null; desiredPlay = false
+            created.release(); player = null; desiredPlay = false; state.buffering = false
             state.message = "음원을 열 수 없어요"; publish()
         }
         session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_MEDIA_ID, track.id)
             .putString(MediaMetadata.METADATA_KEY_TITLE, track.title).putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist)
             .putString(MediaMetadata.METADATA_KEY_ALBUM, "지역별 창작 시연곡").build())
         publish()
+    }
+    private fun loadApple(track: Track, autoplay: Boolean) {
+        val problem = AppleMusicConfig.tokenProblem() ?: MusicKitBridge.problem()
+        if (!appleMusic.connected || problem != null) {
+            state.message = problem ?: "Apple Music 화면에서 계정을 먼저 연결해 주세요"; publish(); return
+        }
+        // Each selected song gets its own controller generation; late callbacks cannot skip a new song.
+        releaseApplePlayer()
+        player?.release(); player = null; ready = false
+        audio.abandonAudioFocusRequest(focus)
+        val expectedGeneration = appleGeneration
+        stopped = false; desiredPlay = autoplay; state.current = track; state.playing = false
+        state.buffering = autoplay; state.positionMs = 0; state.durationMs = track.durationMs.coerceAtLeast(1)
+        session.isActive = true
+        session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_MEDIA_ID, track.id)
+            .putString(MediaMetadata.METADATA_KEY_TITLE, track.title).putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist)
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, track.reason)
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, state.durationMs.toLong()).build())
+        try {
+            applePlayer = MusicKitBridge.player(this, appleMusic.account,
+                onChanged = { if (expectedGeneration == appleGeneration) { syncApplePlayback(); publish() } },
+                onEnded = { if (expectedGeneration == appleGeneration && desiredPlay) skip(1) },
+                onError = { if (expectedGeneration == appleGeneration) applePlaybackFailed() })
+            applePlayer!!.load(requireNotNull(track.appleMusicId))
+            if (!autoplay) applePlayer!!.pause()
+            state.message = "Apple Music · 전체 곡 스트리밍"
+        } catch (_: Exception) { applePlaybackFailed() }
+        catch (_: LinkageError) { applePlaybackFailed() }
+        publish()
+    }
+    private fun syncApplePlayback() {
+        appleAction { native ->
+            state.playing = native.playing; state.positionMs = native.positionMs
+            if (native.durationMs > 1) state.durationMs = native.durationMs
+            if (state.playing) state.buffering = false
+            // Pause can arrive while MusicKit is still preparing the queue.
+            if (!desiredPlay && state.playing) { native.pause(); state.playing = false; state.buffering = false }
+        }
+    }
+    private fun appleAction(action: (MusicKitBridge.NativePlayer) -> Unit) {
+        try { applePlayer?.let(action) }
+        catch (_: Exception) { applePlaybackFailed() }
+        catch (_: LinkageError) { applePlaybackFailed() }
+    }
+    private fun applePlaybackFailed() {
+        desiredPlay = false; state.playing = false; state.buffering = false
+        releaseApplePlayer(); session.isActive = false
+        state.message = "Apple Music 재생에 실패했어요. 구독·인터넷 연결과 MusicKit 설정을 확인해 주세요"; publish()
+    }
+    private fun releaseApplePlayer() {
+        appleGeneration++
+        val previous = applePlayer; applePlayer = null
+        runCatching { previous?.stop() }; runCatching { previous?.close() }
     }
     private fun play() {
         stopped = false
@@ -202,6 +284,12 @@ class PlaybackService : MediaBrowserService() {
             return
         }
         desiredPlay = true
+        if (state.current?.appleMusicId != null) {
+            if (!appleMusic.connected) { state.message = "Apple Music에 다시 연결해 주세요"; desiredPlay = false; publish(); return }
+            if (applePlayer == null) loadApple(state.current!!, true)
+            else { session.isActive = true; state.buffering = true; appleAction { it.play() }; publish() }
+            return
+        }
         if (player == null) { state.current?.let { load(it, true) }; return }
         if (!ready) return
         if (audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
@@ -214,7 +302,8 @@ class PlaybackService : MediaBrowserService() {
     private fun pause(abandon: Boolean = true) {
         desiredPlay = false
         if (ready) player?.pause()
-        state.playing = false
+        appleAction { it.pause() }
+        state.playing = false; state.buffering = false
         if (abandon) {
             resumeOnGain = false; ducked = false; player?.setVolume(1f, 1f)
             audio.abandonAudioFocusRequest(focus)
@@ -223,6 +312,7 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun stopPlayback() {
         pause(); player?.release(); player = null; ready = false
+        releaseApplePlayer()
         stopped = true; state.positionMs = 0; session.isActive = false; publish()
     }
     private fun stopAll() {
@@ -230,6 +320,7 @@ class PlaybackService : MediaBrowserService() {
         stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf(); publish()
     }
     private fun skip(direction: Int) {
+        if (direction < 0 && applePlayer != null && state.positionMs > 3000) { appleAction { it.seek(0) }; return }
         if (direction < 0 && ready && (player?.currentPosition ?: 0) > 3000) { player?.seekTo(0); return }
         val next = index + direction
         if (next in queue.indices) { index = next; load(queue[next], true) }
@@ -247,7 +338,7 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun stopPosition() { locationSource?.stop(); locationSource = null; state.demo = false }
     private fun publish() {
-        val playbackState = if (state.playing) PlaybackState.STATE_PLAYING else if (stopped) PlaybackState.STATE_STOPPED else if (state.current == null) PlaybackState.STATE_NONE else PlaybackState.STATE_PAUSED
+        val playbackState = if (state.buffering) PlaybackState.STATE_BUFFERING else if (state.playing) PlaybackState.STATE_PLAYING else if (stopped) PlaybackState.STATE_STOPPED else if (state.current == null) PlaybackState.STATE_NONE else PlaybackState.STATE_PAUSED
         session.setPlaybackState(PlaybackState.Builder().setActions(
             PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP or
                 PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
@@ -262,10 +353,10 @@ class PlaybackService : MediaBrowserService() {
             PendingIntent.getService(this, name.hashCode(), Intent(this, PlaybackService::class.java).setAction(name), PendingIntent.FLAG_IMMUTABLE)).build()
         return Notification.Builder(this, "playback").setSmallIcon(R.drawable.ic_music)
             .setContentTitle(state.current?.title ?: "길 위의 음악")
-            .setContentText(state.region?.name ?: state.source).setContentIntent(session.controller.sessionActivity)
+            .setContentText(if (state.current?.appleMusicId != null) state.current?.artist else state.region?.name ?: state.source).setContentIntent(session.controller.sessionActivity)
             .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1, 2))
             .addAction(action("previous", "이전 곡", android.R.drawable.ic_media_previous))
-            .addAction(action("play", if (state.playing) "일시정지" else "재생", if (state.playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play))
+            .addAction(action("play", if (state.playing || state.buffering) "일시정지" else "재생", if (state.playing || state.buffering) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play))
             .addAction(action("next", "다음 곡", android.R.drawable.ic_media_next))
             .addAction(action("stop", "종료", android.R.drawable.ic_menu_close_clear_cancel))
             .setOnlyAlertOnce(true).setOngoing(state.playing).build()
@@ -284,8 +375,9 @@ class PlaybackService : MediaBrowserService() {
     }
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null); stopPosition(); player?.release(); player = null
+        releaseApplePlayer()
         audio.abandonAudioFocusRequest(focus); session.release(); unregisterReceiver(noisy)
-        state.playing = false; state.current = null; state.positionMs = 0; state.durationMs = 1
+        state.playing = false; state.buffering = false; state.current = null; state.positionMs = 0; state.durationMs = 1
         state.source = "위치 수신 중지"; state.changed(); super.onDestroy()
     }
 }
