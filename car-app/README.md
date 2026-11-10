@@ -89,7 +89,8 @@ python tools/smoke_test.py --adb PATH_TO_ADB
 | `PlaybackService.kt` | 실제 재생, 미디어 탐색·세션, 위치 수명주기, 시연 이동 |
 | `PositionSource.kt` | 좌표 수신 인터페이스와 Android 구현 |
 | `src/pleos/.../PositionFactory.kt` | 공식 Pleos 위치 SDK 구현 |
-| `MainActivity.kt` | 세로 전용 지도·음악 목록, 탐색/보관함, 하단 미니 플레이어와 재생 메뉴 |
+| `MainActivity.kt` | 가로(차량: 내비 레일·지도·목록·하단 재생 바) / 세로(지도·목록·미니 플레이어·하단 탭) 반응형 화면 |
+| `DesignSystem.kt` | 다크 디자인 토큰(색·액센트)과 벡터 아이콘 |
 | `MusicMapView.kt` | OSM 타일 지도, 지역 핀과 현재 좌표 |
 | `CarUxGuard.kt` | AAOS 주행 UX 제한 수신 |
 

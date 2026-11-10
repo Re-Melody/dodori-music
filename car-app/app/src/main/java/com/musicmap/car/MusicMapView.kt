@@ -15,6 +15,8 @@ class MusicMapView(context: Context) : View(context) {
     var point: GeoPoint? = null
     var regionId: String? = null
     var zoom = 10
+    /** Display scale shared with the activity so labels follow the type scale. */
+    var scale = 1f
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tiles = object : android.util.LruCache<String, Bitmap>(48) {}
     private val pending = mutableSetOf<String>()
@@ -22,7 +24,13 @@ class MusicMapView(context: Context) : View(context) {
     private val workers = Executors.newFixedThreadPool(2)
     private var closed = false
     private var tileError = false
-    private val d = resources.displayMetrics.density
+    private val d get() = resources.displayMetrics.density * scale
+    /** Inverted luminance: light OSM tiles become a dark, achromatic base map. */
+    private val darkTiles = ColorMatrixColorFilter(floatArrayOf(
+        -.135f, -.264f, -.051f, 0f, 140f,
+        -.135f, -.264f, -.051f, 0f, 142f,
+        -.135f, -.264f, -.051f, 0f, 148f,
+        0f, 0f, 0f, 1f, 0f))
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
         contentDescription = "현재 위치와 지역별 음악을 보여주는 지도"
@@ -38,7 +46,7 @@ class MusicMapView(context: Context) : View(context) {
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(Color.rgb(224, 232, 218))
+        canvas.drawColor(Ui.RAISED)
         val center = world(point ?: GeoPoint(37.38, 127.04), zoom)
         val tileSize = 256.0
         val left = center.first - width / 2.0; val top = center.second - height / 2.0
@@ -51,11 +59,11 @@ class MusicMapView(context: Context) : View(context) {
                 val x = (tx * tileSize - left).toFloat(); val y = (ty * tileSize - top).toFloat()
                 val bitmap = tiles.get(key)
                 if (bitmap != null) {
-                    paint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(.45f) })
+                    paint.colorFilter = darkTiles
                     canvas.drawBitmap(bitmap, null, RectF(x, y, x + 256, y + 256), paint)
                     paint.colorFilter = null
                 } else {
-                    paint.color = Color.rgb(204, 216, 199); paint.style = Paint.Style.STROKE
+                    paint.color = Ui.CARD; paint.style = Paint.Style.STROKE
                     canvas.drawRect(x, y, x + 256, y + 256, paint); paint.style = Paint.Style.FILL
                     requestTile(key)
                 }
@@ -70,25 +78,28 @@ class MusicMapView(context: Context) : View(context) {
             val p = screen(region.point)
             if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
         }
-        paint.color = Color.rgb(37, 104, 79); paint.strokeWidth = 3 * d; paint.style = Paint.Style.STROKE
+        paint.color = Ui.BORDER_LIGHT; paint.strokeWidth = 3 * d; paint.style = Paint.Style.STROKE
         paint.pathEffect = DashPathEffect(floatArrayOf(8 * d, 6 * d), 0f); canvas.drawPath(path, paint)
         paint.pathEffect = null; paint.style = Paint.Style.FILL
         Catalog.regions.forEach { region ->
             val p = screen(region.point)
-            paint.color = if (region.id == regionId) Color.rgb(37, 104, 79) else Color.rgb(80, 112, 95)
-            canvas.drawCircle(p.x, p.y, 7 * d, paint)
-            paint.textSize = 13 * d; paint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            paint.setShadowLayer(3 * d, 0f, 1f, Color.WHITE)
+            val active = region.id == regionId
+            paint.color = Ui.BASE; canvas.drawCircle(p.x, p.y, 9 * d, paint)
+            paint.color = if (active) Ui.ACCENT else Ui.TEXT_MUTED
+            canvas.drawCircle(p.x, p.y, 6.5f * d, paint)
+            paint.color = if (active) Ui.TEXT else Ui.TEXT_SOFT
+            paint.textSize = 13 * d; paint.typeface = Typeface.create(Typeface.DEFAULT, 700, false)
+            paint.setShadowLayer(4 * d, 0f, 1f, Color.BLACK)
             canvas.drawText(region.name, p.x + 12 * d, p.y - 10 * d, paint); paint.clearShadowLayer()
         }
         point?.let {
             val p = screen(it)
-            paint.color = 0x44A9E9C7; canvas.drawCircle(p.x, p.y, 24 * d, paint)
+            paint.color = 0x401ED760; canvas.drawCircle(p.x, p.y, 24 * d, paint)
             paint.color = Color.WHITE; canvas.drawCircle(p.x, p.y, 11 * d, paint)
-            paint.color = Color.rgb(41, 153, 132); canvas.drawCircle(p.x, p.y, 7 * d, paint)
+            paint.color = Ui.ACCENT; canvas.drawCircle(p.x, p.y, 7 * d, paint)
         }
-        paint.color = 0xE6F7F8F3.toInt(); canvas.drawRect(0f, height - 43 * d, width.toFloat(), height.toFloat(), paint)
-        paint.color = Color.rgb(80, 103, 91); paint.textSize = 10 * d
+        paint.color = 0xE6121212.toInt(); paint.typeface = Typeface.DEFAULT; canvas.drawRect(0f, height - 43 * d, width.toFloat(), height.toFloat(), paint)
+        paint.color = Ui.TEXT_MUTED; paint.textSize = 10 * d
         canvas.drawText("© OpenStreetMap contributors · 점선: 시연 경로", 12 * d, height - 22 * d, paint)
         canvas.drawText(if (tileError) "지도 연결 대기 · 위치와 시연 경로는 계속 표시됩니다" else "음악 지역 3곳 · 시연 카탈로그", 12 * d, height - 7 * d, paint)
     }

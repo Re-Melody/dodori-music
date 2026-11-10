@@ -31,7 +31,8 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 -Variant standard -Avd Pixel_
 ```
 
 두 빌드의 applicationId가 같으므로 같은 기기에 설치하면 기존 앱이 교체됩니다.
-현재 앱은 세로 화면을 요청합니다. Pleos의 차량 화면과 멀티윈도우에서 표시되는 실제 크기도 확인해야 합니다.
+앱은 화면 방향을 고정하지 않습니다. 가로 폭 840dp 이상이면 차량용 가로 배치를, 그 외에는 세로 배치를 사용합니다.
+Pleos 2.1.0 에뮬레이터의 앱 창은 1682×1210dp(멀티윈도우, 160dpi)로 측정됐습니다.
 
 ## 점검 범위
 
