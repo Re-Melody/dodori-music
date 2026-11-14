@@ -44,7 +44,19 @@ class AppleMusicActivity : Activity() {
             guard = CarUxGuard(this) { value -> runOnUiThread { restricted = value; renderState() } }
         }
         renderState()
-        if (repository.connected && !signingIn) loadLibrary()
+        // Debug builds only: accept a Music User Token obtained outside the app (MusicKit on the web).
+        val supplied = if (BuildConfig.DEBUG) intent.getStringExtra("mut")?.trim() else null
+        if (!supplied.isNullOrEmpty()) {
+            busy = true; feedback.text = "Apple Music 계정을 확인하고 있어요…"
+            val id = ++requestId
+            repository.connect(supplied) { result ->
+                if (id != requestId || isDestroyed) return@connect
+                busy = false
+                result.onSuccess { feedback.text = "Apple Music에 연결했어요. 곡을 선택하면 전체 곡을 재생합니다."; loadLibrary() }
+                    .onFailure { feedback.text = failureMessage(it) }
+                renderState()
+            }
+        } else if (repository.connected && !signingIn) loadLibrary()
         else if (!restricted && repository.catalogReady) feedback.text = "곡이나 아티스트를 검색하면 30초 미리듣기로 바로 들을 수 있어요"
         renderState()
     }

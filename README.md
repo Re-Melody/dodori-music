@@ -62,4 +62,4 @@ Windows에서는 `car-app/run.ps1`이 에뮬레이터 실행부터 설치까지 
 
 - [개발 문서](car-app/README.md): 구조, 테스트, 남은 작업
 - [Pleos 실행 가이드](car-app/docs/PLEOS.md)
-- [Apple Music 연동 상태](car-app/docs/APPLE_MUSIC.md): 검색·미리듣기는 동작, 로그인·전체 곡 재생은 미검증
+- [Apple Music 연동 상태](car-app/docs/APPLE_MUSIC.md): 검색·미리듣기 동작. 계정 연결·전체 곡 재생은 개발용 경로로 Pleos 에뮬레이터에서 확인

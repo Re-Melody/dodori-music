@@ -333,8 +333,8 @@ class PlaybackService : MediaBrowserService() {
             applePlayer!!.load(requireNotNull(track.appleMusicId))
             if (!autoplay) applePlayer!!.pause()
             state.message = "Apple Music · 전체 곡 스트리밍"
-        } catch (_: Exception) { applePlaybackFailed() }
-        catch (_: LinkageError) { applePlaybackFailed() }
+        } catch (e: Exception) { android.util.Log.w("MusicKitBridge", "load failed", e); applePlaybackFailed() }
+        catch (e: LinkageError) { android.util.Log.w("MusicKitBridge", "load failed", e); applePlaybackFailed() }
         publish()
     }
     private fun syncApplePlayback() {
@@ -348,8 +348,8 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun appleAction(action: (MusicKitBridge.NativePlayer) -> Unit) {
         try { applePlayer?.let(action) }
-        catch (_: Exception) { applePlaybackFailed() }
-        catch (_: LinkageError) { applePlaybackFailed() }
+        catch (e: Exception) { android.util.Log.w("MusicKitBridge", "player call failed", e); applePlaybackFailed() }
+        catch (e: LinkageError) { android.util.Log.w("MusicKitBridge", "player call failed", e); applePlaybackFailed() }
     }
     private fun applePlaybackFailed() {
         desiredPlay = false; state.playing = false; state.buffering = false

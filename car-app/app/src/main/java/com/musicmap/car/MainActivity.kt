@@ -90,6 +90,11 @@ class MainActivity : Activity() {
             addAll(drivePermissions())
         }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 20)
+        // Debug builds only: forward a Music User Token obtained outside the app to the account screen.
+        if (BuildConfig.DEBUG) intent.getStringExtra("mut")?.let {
+            intent.removeExtra("mut")
+            startActivity(Intent(this, AppleMusicActivity::class.java).putExtra("mut", it))
+        }
     }
     override fun onStart() { super.onStart(); state.listeners.add(update); render() }
     override fun onStop() { state.listeners.remove(update); super.onStop() }

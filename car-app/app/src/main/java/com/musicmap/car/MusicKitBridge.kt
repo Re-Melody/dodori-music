@@ -46,8 +46,16 @@ object MusicKitBridge {
             ?.takeIf { it.isNotBlank() } ?: error("Apple Music 인증 결과가 비어 있어요. 다시 연결해 주세요.")
     }
 
+    /** The SDK's native player is not loaded by the AAR itself; Apple's sample loads these two before creating a controller. */
+    private val nativeLibraries: Unit by lazy {
+        System.loadLibrary("c++_shared")
+        System.loadLibrary("appleMusicSDK")
+    }
     fun player(context: Context, account: AppleMusicAccount, onChanged: () -> Unit, onEnded: () -> Unit,
-               onError: () -> Unit) = NativePlayer(context, account, onChanged, onEnded, onError)
+               onError: () -> Unit): NativePlayer {
+        nativeLibraries
+        return NativePlayer(context, account, onChanged, onEnded, onError)
+    }
 
     class NativePlayer internal constructor(context: Context, account: AppleMusicAccount,
         onChanged: () -> Unit, onEnded: () -> Unit, onError: () -> Unit) : AutoCloseable {
@@ -60,6 +68,8 @@ object MusicKitBridge {
             when (method.name) {
                 "getDeveloperToken" -> AppleMusicConfig.developerToken
                 "getUserToken" -> account.userToken
+                // SDK 1.1.3+: the encoded storefront from the Apple Music app. Unknown when the token came from elsewhere.
+                "getAppleMusicStoreFrontId" -> null
                 "toString" -> "MusicMapTokenProvider"
                 "hashCode" -> System.identityHashCode(proxy)
                 "equals" -> proxy === args?.firstOrNull()
@@ -76,7 +86,12 @@ object MusicKitBridge {
                 else -> {
                     main.post {
                         if (!closed) when (method.name) {
-                            "onError" -> onError()
+                            "onError", "onPlaybackError" -> {
+                                val error = args?.getOrNull(1) as? Throwable
+                                val type = runCatching { error?.javaClass?.getMethod("getType")?.invoke(error) }.getOrNull()
+                                android.util.Log.w("MusicKitBridge", "playback error type=$type cause=${error?.cause}", error)
+                                onError()
+                            }
                             "onItemEnded" -> onEnded()
                             else -> onChanged()
                         }
@@ -96,6 +111,12 @@ object MusicKitBridge {
                 positionGetter; durationGetter
                 type.getMethod("seekToPosition", Long::class.javaPrimitiveType)
                 type.getMethod("addListener", listenerType).invoke(controller, listener)
+                // Hand the SDK the tokens we already hold (the user token may come from outside MusicKitAuth).
+                runCatching {
+                    val store = type.getMethod("getPlaybackStoreConfiguration").invoke(controller)
+                    store.javaClass.methods.first { it.name == "notifyTokenChanged" && it.parameterCount == 2 }
+                        .invoke(store, context.applicationContext, tokens)
+                }.onFailure { android.util.Log.w("MusicKitBridge", "notifyTokenChanged failed", it) }
             } catch (error: Exception) {
                 runCatching { type.getMethod("release").invoke(controller) }
                 throw error

@@ -9,8 +9,23 @@
 
 ![Apple Music 검색](drive-dj-apple-music.png)
 
-계정 로그인, 내 보관함, 전체 곡 재생은 아래 "필요한 설정"의 공식 Android SDK가 있어야 하며 **아직 실행해 보지 못했습니다.**
-Android용 MusicKit 로그인은 기기에 설치된 Apple Music 앱을 거치는 구조로 알려져 있어, 그 앱이 없는 Pleos 에뮬레이터에서는 확인이 어렵습니다.
+## 계정 연결과 전체 곡 재생 (2026-11-14 확인)
+
+Android MusicKit SDK 1.1.4(`MediaPlayback-release-1.1.4.aar`, `MusicKitAuth-release-1.1.5.aar`)를 `app/libs/musickit/`에 넣은 `pleosDebug` 빌드로
+Pleos Connect 에뮬레이터 v2.1.0(arm64)에서 확인했습니다.
+
+- 계정 연결: "연결됨 · KR" 표시, 내 Apple Music 보관함 25곡 조회
+- 전체 곡 재생: 보관함 곡 선택 → 재생 상태 PLAYING, 길이 3:52(미리듣기 30초가 아님), 오류 콜백 없음
+- 연결된 상태의 카탈로그 검색
+
+**로그인 방식에 대한 주의.** SDK의 기본 로그인은 기기에 설치된 Apple Music 앱으로 넘어가는 방식이라(Google Play에서 설치 가능해야 함) Pleos에서는 쓸 수 없습니다.
+이번 확인은 SDK 문서의 "이미 받은 사용자 토큰 직접 넣기" 경로를 썼습니다. Mac 브라우저에서 MusicKit JS로 로그인해 받은 Music User Token을
+**디버그 빌드에서만** 열리는 입력 경로(`am start ... MainActivity --es mut <토큰>`)로 넣었습니다. release 빌드에는 이 경로가 없고, 차량에서 일반 사용자가 로그인하는 방법은 아직 없습니다.
+
+SDK에 맞춰 고친 것: 재생 전에 네이티브 라이브러리(`c++_shared`, `appleMusicSDK`)를 앱이 직접 로드, 오류 콜백 이름 `onPlaybackError`,
+토큰 제공자의 `getAppleMusicStoreFrontId`, 외부에서 받은 토큰을 SDK에 알리는 `notifyTokenChanged`, AAR이 요구하는 androidx 의존성, 매니페스트 `allowBackup` 충돌.
+재생 라이브러리는 arm64·armv7용만 있어 x86_64 에뮬레이터에서는 전체 곡 재생이 되지 않습니다.
+
 계정이 연결되고 SDK가 있으면 전체 곡을, 그렇지 않으면 미리듣기를 재생하도록 자동으로 나뉩니다.
 
 개발자 토큰은 Apple Developer 계정의 MusicKit 키(.p8)로 서명해 만듭니다. .p8과 토큰은 Git에 올리지 않습니다.
