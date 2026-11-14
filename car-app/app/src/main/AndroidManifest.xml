@@ -1,0 +1,30 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <queries><package android:name="com.apple.android.music" /></queries>
+    <application android:name=".MusicMapApplication" android:label="길 위의 음악"
+        android:icon="@drawable/ic_music" android:theme="@style/AppTheme"
+        android:appCategory="audio" android:allowBackup="false" android:usesCleartextTraffic="false">
+        <meta-data android:name="androidx.car.app.launchable" android:value="true" />
+        <activity android:name=".AppleMusicActivity" android:exported="false" />
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Distraction optimization is intentionally not claimed before vehicle UX validation. -->
+        </activity>
+        <service android:name=".PlaybackService" android:exported="true"
+            android:foregroundServiceType="mediaPlayback|location">
+            <intent-filter><action android:name="android.media.browse.MediaBrowserService" /></intent-filter>
+        </service>
+    </application>
+</manifest>
