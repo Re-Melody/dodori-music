@@ -310,9 +310,10 @@ class PlaybackService : MediaBrowserService() {
         val weatherWords = state.drive.songKeyword.takeIf { here != null && state.genre == "전체" }
         // On a planned drive each segment gets a short turn so the road ahead stays in view.
         val planned = state.plan != null
-        state.recommendations = (here?.let { songsFor(it, if (planned) 3 else 8) }.orEmpty() +
-            weatherWords?.let { appleMusic.weatherSongs(it) }.orEmpty().take(if (planned) 1 else 2) +
-            ahead.flatMap { songsFor(it, 1) }).distinctBy { it.id }
+        val hereSongs = here?.let { songsFor(it, if (planned) 3 else 8) }.orEmpty()
+        val weatherSongs = weatherWords?.let { appleMusic.weatherSongs(it) }.orEmpty().take(if (planned) 1 else 2)
+        // Weather picks sit right after the place's lead songs so they are seen without scrolling.
+        state.recommendations = (hereSongs.take(2) + weatherSongs + hereSongs.drop(2) + ahead.flatMap { songsFor(it, 1) }).distinctBy { it.id }
         val reload = { refreshRecommendations(); publish() }
         (listOfNotNull(here) + ahead).forEach { segment -> appleMusic.loadRegionSongs(segment) { reload() } }
         weatherWords?.let { words -> appleMusic.loadWeatherSongs(words) { if (state.drive.songKeyword == words) reload() } }
