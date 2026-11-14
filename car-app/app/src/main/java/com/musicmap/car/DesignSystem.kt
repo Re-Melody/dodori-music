@@ -27,6 +27,8 @@ object Ui {
         "seoul" -> 0xFF6E9DB5.toInt()
         "suwon" -> 0xFFC09662.toInt()
         "yongin" -> 0xFF6FA98A.toInt()
+        "gangnam" -> 0xFFC78A9A.toInt()
+        "jisung" -> 0xFF8FA8D8.toInt()
         else -> TEXT_MUTED
     }
     fun mix(a: Int, b: Int, t: Float): Int = Color.rgb(
@@ -35,7 +37,7 @@ object Ui {
         (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt())
 }
 
-enum class Icon { PLAY, PAUSE, PREV, NEXT, HEART, HEART_FILLED, LOCATE, ROUTE, PLUS, MINUS, ARROW, BACK, NOTE, EQ, VOICE, VOICE_OFF, SEARCH }
+enum class Icon { PLAY, PAUSE, PREV, NEXT, HEART, HEART_FILLED, LOCATE, ROUTE, PLUS, MINUS, ARROW, BACK, NOTE, EQ, VOICE, VOICE_OFF, SEARCH, PIN }
 
 /** Line icons on a 24-unit grid, one stroke width, colored by their text role. */
 class IconDrawable(private var kind: Icon, color: Int) : Drawable() {
@@ -130,6 +132,13 @@ class IconDrawable(private var kind: Icon, color: Int) : Drawable() {
             Icon.VOICE_OFF -> {
                 speaker()
                 canvas.drawLine(16.5f, 9.5f, 21.5f, 14.5f, paint); canvas.drawLine(21.5f, 9.5f, 16.5f, 14.5f, paint)
+            }
+            Icon.PIN -> {
+                stroke(); path.reset()
+                path.moveTo(12f, 21f); path.cubicTo(7f, 15.5f, 5.5f, 12.5f, 5.5f, 10f)
+                path.cubicTo(5.5f, 6.1f, 8.4f, 3.5f, 12f, 3.5f); path.cubicTo(15.6f, 3.5f, 18.5f, 6.1f, 18.5f, 10f)
+                path.cubicTo(18.5f, 12.5f, 17f, 15.5f, 12f, 21f); path.close(); canvas.drawPath(path, paint)
+                canvas.drawCircle(12f, 10f, 2.4f, paint)
             }
             Icon.SEARCH -> { stroke(); canvas.drawCircle(10.5f, 10.5f, 6f, paint); canvas.drawLine(15f, 15f, 20f, 20f, paint) }
         }

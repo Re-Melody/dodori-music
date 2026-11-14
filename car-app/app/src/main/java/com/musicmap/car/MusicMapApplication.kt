@@ -7,6 +7,8 @@ import android.os.Looper
 class MusicMapApplication : Application() {
     val state = AppState()
     val appleMusic by lazy { AppleMusicRepository(this) }
+    val driveData by lazy { DriveData() }
+    val overrides by lazy { SegmentOverrides(this) }
     override fun onCreate() {
         super.onCreate()
         val preferences = getSharedPreferences("music-map", MODE_PRIVATE)
@@ -35,6 +37,10 @@ class AppState {
     var voiceOn = true
     /** The line currently being announced, shown as a caption so it also works with sound off. */
     var caption = ""
+    /** The drive to a chosen destination, if one is set. */
+    var plan: DrivePlan? = null
+    /** Segments already driven through on this plan. */
+    var visited = setOf<String>()
     var favorites = setOf<String>()
     val listeners = linkedSetOf<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())

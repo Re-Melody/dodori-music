@@ -37,12 +37,14 @@ class MainActivity : Activity() {
     private lateinit var jump: Button
     private lateinit var favorite: Button
     private lateinit var voice: ImageButton
-    private lateinit var genres: List<Button>
+    private lateinit var destinationButton: Button
+    private lateinit var assignButton: Button
     private lateinit var tabs: List<Button>
     private lateinit var listScroll: ScrollView
     private lateinit var nowArt: FrameLayout
     private lateinit var sources: LinearLayout
-    private lateinit var filterBar: View
+    private lateinit var planRow: View
+    private var driveArt: FrameLayout? = null
     private val playButtons = mutableListOf<ImageButton>()
     private var panel: View? = null
     private var bar: View? = null
@@ -63,7 +65,8 @@ class MainActivity : Activity() {
     private var driveShown: Boolean? = null
     private val parkedControls = mutableListOf<View>()
     // What the last render applied, so a once-a-second refresh touches only what changed.
-    private var renderedGenre: String? = null
+    private var renderedPlan: DrivePlan? = null
+    private var planRendered = false
     private var renderedTab: Boolean? = null
     private var renderedRestricted: Boolean? = null
     /** Setting identical text still forces a layout pass, so skip it. */
@@ -141,6 +144,10 @@ class MainActivity : Activity() {
         nowArt = FrameLayout(this)
         routeButton = kit.button("경로 둘러보기", Tone.QUIET, Icon.ROUTE) { command("demo") }.apply { contentDescription = "시연 시작" }
         jump = kit.button("다음 지역", Tone.QUIET, Icon.ARROW, iconEnd = true) { command("jump") }
+        destinationButton = kit.button("목적지 정하기", Tone.QUIET, Icon.PIN) { chooseDestination() }
+        assignButton = kit.button("내 곡 지정", Tone.QUIET, Icon.NOTE) {
+            state.region?.let { startActivity(Intent(this, AppleMusicActivity::class.java).putExtra("assign", it.id)) }
+        }
         if (wide) buildWide() else buildCompact()
     }
     private fun buildTabs(): LinearLayout {
@@ -160,14 +167,31 @@ class MainActivity : Activity() {
         sources.addView(jump, kit.lp(0, kit.u(48f), 1f) { leftMargin = kit.u(8f) })
         return sources
     }
-    private fun buildFilters(): View {
-        val filters = kit.row(); parkedControls.add(filters)
-        genres = listOf("전체", Catalog.CALM, Catalog.LIVELY).map { genre ->
-            kit.button(genre, Tone.QUIET) { command("genre", "value", genre) }
-                .also { filters.addView(it, kit.lp(-2, kit.u(40f)) { rightMargin = kit.u(8f) }) }
+    /** Where the drive is going, and the driver's own song for the road they are on. Both are parked-only. */
+    private fun buildPlanRow(): View {
+        val row = kit.row(); parkedControls.add(row)
+        row.addView(destinationButton, kit.lp(0, kit.u(48f), 1f))
+        row.addView(assignButton, kit.lp(-2, kit.u(48f)) { leftMargin = kit.u(8f) })
+        planRow = row
+        return row
+    }
+    private fun chooseDestination() {
+        if (restricted) return
+        var dialog: android.app.AlertDialog? = null
+        val body = kit.column().apply { setPadding(kit.u(24f), kit.u(24f), kit.u(24f), kit.u(20f)) }
+        body.addView(kit.text("어디까지 갈까요", T.TITLE))
+        body.addView(kit.text("가는 길의 곡을 순서대로 엮어 드라이브 트랙을 만들어요", T.CAPTION, Ui.TEXT_MUTED), kit.lp(-1, -2) { topMargin = kit.u(8f); bottomMargin = kit.u(12f) })
+        Catalog.segments.filter { it.id != state.region?.id }.forEach { segment ->
+            body.addView(kit.button(segment.name, if (state.plan?.destination?.id == segment.id) Tone.SELECTED else Tone.QUIET) {
+                command("destination", "id", segment.id); dialog?.dismiss()
+            }, kit.lp(-1, kit.u(52f)) { topMargin = kit.u(8f) })
         }
-        filterBar = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(filters) }
-        return filterBar
+        if (state.plan != null) body.addView(kit.button("목적지 지우기", Tone.OUTLINE) { command("destination_clear"); dialog?.dismiss() },
+            kit.lp(-1, kit.u(48f)) { topMargin = kit.u(16f) })
+        dialog = android.app.AlertDialog.Builder(this).setView(ScrollView(this).apply { addView(body) }).create().apply {
+            show(); window?.setBackgroundDrawable(kit.shape(Ui.SURFACE, 16f, Ui.HAIRLINE))
+            window?.setLayout(minOf(kit.u(520f), resources.displayMetrics.widthPixels - kit.u(48f)), ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
     }
     private fun playButton(size: Float) = kit.circle(Icon.PLAY, size, Ui.ACCENT, Ui.ON_ACCENT, "재생") { command("play") }.also { playButtons.add(it) }
     private fun skipButton(icon: Icon, size: Float, label: String, action: String) =
@@ -194,7 +218,7 @@ class MainActivity : Activity() {
         place.addView(placeTitle, kit.lp(-1, -2) { topMargin = kit.u(8f) })
         place.addView(contextText, kit.lp(-1, -2) { topMargin = kit.u(8f) })
         place.addView(kit.laneRule(), kit.lp(kit.u(72f), kit.u(4f)) { topMargin = kit.u(20f) })
-        place.addView(buildFilters(), kit.lp(-1, -2) { topMargin = kit.u(20f) })
+        place.addView(buildPlanRow(), kit.lp(-1, -2) { topMargin = kit.u(20f) })
         listScroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         val listBody = kit.column(); listScroll.addView(listBody)
         listBody.addView(tracks); listBody.addView(messageText, kit.lp(-1, -2) { topMargin = kit.u(12f); leftMargin = kit.u(8f) })
@@ -244,6 +268,8 @@ class MainActivity : Activity() {
     /** Shown instead of the panels while the vehicle is moving: large type, three controls, nothing to browse. */
     private fun buildDrive(): View {
         val view = floating(kit.row(), 20f).apply { setPadding(kit.u(32f), kit.u(28f), kit.u(32f), kit.u(28f)); visibility = View.GONE }
+        // The cover is the one thing a glance should catch besides the place name.
+        driveArt = FrameLayout(this).also { view.addView(it, kit.lp(kit.u(176f), kit.u(176f)) { rightMargin = kit.u(32f) }) }
         val words = kit.column()
         words.addView(kit.text("지금 지나는 곳", T.BODY, Ui.TEXT_MUTED))
         drivePlace = kit.oneLine(kit.text("", T.HERO)).also { words.addView(it, kit.lp(-1, -2) { topMargin = kit.u(8f) }) }
@@ -288,7 +314,7 @@ class MainActivity : Activity() {
         exploring.addView(buildSources(), kit.lp(-1, -2) { topMargin = kit.u(12f) })
         exploring.addView(sourceText, kit.lp(-1, -2) { topMargin = kit.u(8f) })
         content.addView(exploring); explore = exploring
-        content.addView(buildFilters(), kit.lp(-1, -2) { topMargin = kit.u(20f) })
+        content.addView(buildPlanRow(), kit.lp(-1, -2) { topMargin = kit.u(20f) })
         content.addView(tracks, kit.lp(-1, -2) { topMargin = kit.u(12f); leftMargin = -kit.u(8f); rightMargin = -kit.u(8f) })
         content.addView(messageText, kit.lp(-1, -2) { topMargin = kit.u(12f) })
 
@@ -344,9 +370,16 @@ class MainActivity : Activity() {
         row.addView(kit.art(track), kit.lp(kit.u(56f), kit.u(56f)) { rightMargin = kit.u(16f) })
         val info = kit.column()
         info.addView(kit.oneLine(kit.text(track.title, T.BODY_STRONG, if (current) Ui.ACCENT else Ui.TEXT)))
-        val place = Catalog.regions.firstOrNull { it.id == track.regionId }?.name
-        val detail = if (track.appleMusicId != null) "${track.artist} · ${track.reason}"
-            else if (favoritesOnly && place != null) "$place · ${track.reason}" else track.reason
+        val place = Catalog.segments.firstOrNull { it.id == track.regionId }?.name
+        val ahead = !favoritesOnly && place != null && track.regionId != state.region?.id
+        val detail = when {
+            ahead -> "다음 · $place · ${track.artist}"
+            track.genre == Catalog.MINE -> "${Catalog.MINE} · ${track.artist}"
+            track.genre == Catalog.WEATHER -> "${Catalog.WEATHER} · ${track.artist}"
+            track.appleMusicId != null -> "${track.artist} · ${track.reason}"
+            favoritesOnly && place != null -> "$place · ${track.reason}"
+            else -> track.reason
+        }
         info.addView(kit.oneLine(kit.text(detail, T.CAPTION, Ui.TEXT_MUTED)), kit.lp(-1, -2) { topMargin = kit.u(4f) })
         row.addView(info, kit.lp(0, -2, 1f))
         if (saved) row.addView(ImageView(this).apply { setImageDrawable(IconDrawable(Icon.HEART_FILLED, Ui.TEXT_MUTED)); contentDescription = "보관함에 저장됨" }, kit.lp(kit.u(18f), kit.u(18f)) { leftMargin = kit.u(12f) })
@@ -384,17 +417,26 @@ class MainActivity : Activity() {
         jump.visibility = if (state.demo) View.VISIBLE else View.GONE
         (voice.drawable as? IconDrawable)?.icon = if (state.voiceOn) Icon.VOICE else Icon.VOICE_OFF
         voice.contentDescription = if (state.voiceOn) "음성 안내 켜짐" else "음성 안내 꺼짐"
-        if (map.point != state.point || map.regionId != region?.id) { map.point = state.point; map.regionId = region?.id; map.invalidate() }
-        if (renderedGenre != state.genre) {
-            renderedGenre = state.genre
-            genres.forEach { kit.tone(it, if (it.text.toString() == state.genre) Tone.SELECTED else Tone.QUIET) }
+        val plan = state.plan
+        if (map.point != state.point || map.regionId != region?.id || renderedPlan !== plan) {
+            map.point = state.point; map.regionId = region?.id
+            map.path = plan?.path; map.routeIds = plan?.segments.orEmpty().map { it.id }.toSet(); map.invalidate()
         }
+        if (renderedPlan !== plan || !planRendered) {
+            renderedPlan = plan; planRendered = true
+            kit.label(destinationButton, plan?.let { "${it.destination.name}까지" } ?: "목적지 정하기")
+            kit.tone(destinationButton, if (plan != null) Tone.SELECTED else Tone.QUIET)
+        }
+        planRow.visibility = if (favoritesOnly) View.GONE else View.VISIBLE
+        assignButton.visibility = if (region != null) View.VISIBLE else View.GONE
 
         val list = if (favoritesOnly) Catalog.tracks.filter { it.id in state.favorites && (state.genre == "전체" || it.genre == state.genre) } else state.recommendations
         val contextLine = when {
             favoritesOnly -> if (list.isEmpty()) "" else "${list.size}곡"
             state.drive.line.isNotBlank() -> state.drive.line
+            region != null && plan != null -> "${plan.destination.name}까지의 드라이브 트랙 ${list.size}곡"
             region != null -> "이곳에 어울리는 곡 ${list.size}곡"
+            plan != null -> "${plan.destination.name}까지 ${plan.segments.size}개 구간을 지나요"
             else -> "현재 위치를 켜거나 경로를 둘러보세요"
         }
         contextText.show(contextLine)
@@ -402,7 +444,6 @@ class MainActivity : Activity() {
         sourceText.show(if (favoritesOnly || (waiting && state.source == "위치 수신 대기")) "" else state.source)
         sourceText.visibility = if (sourceText.text.isEmpty()) View.GONE else View.VISIBLE
 
-        filterBar.visibility = if (favoritesOnly || region != null) View.VISIBLE else View.GONE
         val listKey = list.joinToString { it.id } + current?.id + state.playing + state.favorites.sorted().joinToString() + favoritesOnly + (state.point != null)
         var listRebuilt = false
         if (listKey != renderedList) {
@@ -431,10 +472,11 @@ class MainActivity : Activity() {
         if (nowArtFor != current?.id) {
             nowArtFor = current?.id; nowArt.removeAllViews()
             nowArt.addView(kit.art(current), FrameLayout.LayoutParams(-1, -1))
+            driveArt?.let { it.removeAllViews(); it.addView(kit.art(current, 16f), FrameLayout.LayoutParams(-1, -1)) }
         }
         currentText.show(current?.title ?: "재생 중인 곡이 없어요")
         val artistLine = current?.let {
-            val tail = if (it.genre == Catalog.POPULAR) Catalog.regions.firstOrNull { r -> r.id == it.regionId }?.name ?: it.genre else it.genre
+            val tail = if (it.genre == Catalog.POPULAR) Catalog.segments.firstOrNull { r -> r.id == it.regionId }?.name ?: it.genre else it.genre
             if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · $tail"
         }
         detailText.show(artistLine ?: "곡을 고르면 여기에서 이어집니다")

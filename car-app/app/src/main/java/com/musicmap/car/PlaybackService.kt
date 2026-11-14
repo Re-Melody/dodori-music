@@ -36,15 +36,19 @@ class PlaybackService : MediaBrowserService() {
     private var announcing = false
     private var signalsStarted = false
     private var ticks = 0
+    private val app get() = application as MusicMapApplication
+    private var planGeneration = 0
+    private var lastReplanAt = 0L
+    private var weatherAt = 0L
+    private var weatherPoint: GeoPoint? = null
     private var notifiedKey: String? = null
     private val preferences by lazy { getSharedPreferences("music-map", MODE_PRIVATE) }
     private val tick = object : Runnable {
         override fun run() {
             if (state.demo) {
                 state.demoProgress = (state.demoProgress + 1.0 / 180).coerceAtMost(1.0)
-                updatePosition(Catalog.routePoint(state.demoProgress))
-                applyDemoWeather()
-                if (state.demoProgress >= 1.0) { state.demo = false; state.source = "둘러보기 도착"; setContext(vehicleContext) }
+                updatePosition(demoPoint())
+                if (state.demoProgress >= 1.0) { state.demo = false; state.source = "둘러보기 도착" }
             }
             val positionBefore = state.positionMs
             if (ready) player?.let { state.positionMs = it.currentPosition; state.durationMs = it.duration }
@@ -118,8 +122,8 @@ class PlaybackService : MediaBrowserService() {
         signalsStarted = true
         signals = createDriveSignals(this)?.also { source ->
             source.start(
-                { rain -> vehicleContext = vehicleContext.copy(rain = rain); if (!state.demo) setContext(vehicleContext) },
-                { mode -> vehicleContext = vehicleContext.copy(mode = mode); if (!state.demo) setContext(vehicleContext) })
+                { rain -> vehicleContext = vehicleContext.copy(rain = rain); setContext(vehicleContext) },
+                { mode -> vehicleContext = vehicleContext.copy(mode = mode); setContext(vehicleContext) })
         }
     }
 
@@ -130,13 +134,47 @@ class PlaybackService : MediaBrowserService() {
         state.drive = next
         if (moodChanged) {
             refreshRecommendations()
-            if (state.region != null) next.spoken?.let(::announce)
+            // Let a line that is being spoken finish before explaining the new mood.
+            val line = next.spoken
+            if (state.region != null && line != null)
+                handler.postDelayed({ if (state.drive == next) announce(line) }, if (state.caption.isEmpty()) 0L else 8500L)
         }
         publish()
     }
-    /** The guided route shows the rain response between Suwon and Yongin; real drives use the vehicle. */
-    private fun applyDemoWeather() {
-        setContext(DriveContext(rain = state.demoProgress in 0.6..0.92))
+    /** Where the guided drive is: along the planned route when there is one, else the default tour of the landmarks. */
+    private fun demoPoint(): GeoPoint = state.plan?.let { Route.pointAt(it.path, state.demoProgress) } ?: Catalog.routePoint(state.demoProgress)
+
+    /** Asks for the weather at the car's position, at most every ten minutes or after 15 km. */
+    private fun refreshWeather(point: GeoPoint) {
+        val now = SystemClock.elapsedRealtime()
+        val moved = weatherPoint?.let { Catalog.distanceKm(it, point) > 15.0 } ?: true
+        if (!moved && now - weatherAt < 600_000) return
+        weatherAt = now; weatherPoint = point
+        app.driveData.weather(point) { weather ->
+            android.util.Log.i("DriveData", "weather=${weather?.sky} day=${weather?.isDay}")
+            if (weather != null) { vehicleContext = vehicleContext.copy(weather = weather); setContext(vehicleContext) }
+        }
+    }
+
+    /** Builds the drive track: the road route to the destination, cut into the mapped segments it passes. */
+    private fun planTo(destination: MusicRegion, announceIt: Boolean = true) {
+        val from = state.point ?: Catalog.regions.first().point
+        val generation = ++planGeneration
+        state.source = "${destination.name}까지 길을 찾는 중"
+        app.driveData.route(from, destination.point) { road ->
+            if (generation != planGeneration) return@route
+            val path = road ?: listOf(from, destination.point)
+            val segments = Route.plan(path, Catalog.segments)
+            state.plan = DrivePlan(destination, path, segments)
+            state.visited = setOfNotNull(state.region?.id)
+            if (state.demo) state.demoProgress = 0.0
+            state.source = if (road == null) "${destination.name}까지 · 길 찾기 연결이 안 돼 직선으로 계산했어요"
+                else "${destination.name}까지 · ${segments.size}개 구간"
+            refreshRecommendations()
+            if (announceIt) announce("${destination.spoken}까지 드라이브 트랙을 만들었어요. ${segments.size}개 구간을 지나요")
+            publish()
+        }
+        publish()
     }
     private val clearCaption = Runnable { state.caption = ""; state.changed() }
     private fun announce(text: String) {
@@ -196,25 +234,35 @@ class PlaybackService : MediaBrowserService() {
             "demo" -> {
                 stopPosition(); state.demoProgress = 0.0; state.demo = true
                 ensureForeground()
-                state.source = "둘러보기 · 서울에서 용인까지"
-                updatePosition(Catalog.routePoint(0.0))
-                applyDemoWeather()
+                state.source = state.plan?.let { "둘러보기 · ${it.destination.name}까지" } ?: "둘러보기 · 서울에서 용인까지"
+                state.visited = emptySet()
+                updatePosition(demoPoint())
             }
             "jump" -> if (state.demo) {
-                state.demoProgress = if (state.demoProgress < 0.5) 0.5 else 1.0
-                updatePosition(Catalog.routePoint(state.demoProgress))
-                applyDemoWeather()
+                val plan = state.plan
+                state.demoProgress = if (plan == null) (if (state.demoProgress < 0.5) 0.5 else 1.0)
+                    // On a planned drive, skip ahead to where the next segment begins.
+                    else plan.segments.mapNotNull { Route.entryProgress(plan.path, it) }.filter { it > state.demoProgress + 0.004 }.minOrNull() ?: 1.0
+                updatePosition(demoPoint())
             }
+            "destination" -> Catalog.segments.find { it.id == intent.getStringExtra("id") }?.let { planTo(it) }
+            "destination_clear" -> {
+                planGeneration++; state.plan = null; state.visited = emptySet()
+                state.source = if (state.demo) "둘러보기 · 서울에서 용인까지" else state.source
+                refreshRecommendations()
+            }
+            // A song was assigned to (or removed from) a segment on the Apple Music screen.
+            "refresh" -> refreshRecommendations()
             "voice" -> {
                 state.voiceOn = !state.voiceOn
                 preferences.edit().putBoolean("voice", state.voiceOn).apply()
                 if (!state.voiceOn) announcer?.stop()
             }
             // Debug builds only: stand in for the vehicle signals when recording on a plain emulator.
-            "sim_rain" -> if (BuildConfig.DEBUG) { vehicleContext = vehicleContext.copy(rain = intent.getBooleanExtra("on", true)); if (!state.demo) setContext(vehicleContext) }
+            "sim_rain" -> if (BuildConfig.DEBUG) { vehicleContext = vehicleContext.copy(rain = intent.getBooleanExtra("on", true)); setContext(vehicleContext) }
             "sim_mode" -> if (BuildConfig.DEBUG) {
                 vehicleContext = vehicleContext.copy(mode = runCatching { DriveMode.valueOf(intent.getStringExtra("value") ?: "NORMAL") }.getOrDefault(DriveMode.NORMAL))
-                if (!state.demo) setContext(vehicleContext)
+                setContext(vehicleContext)
             }
             "live" -> startPosition()
             "genre" -> {
@@ -232,22 +280,43 @@ class PlaybackService : MediaBrowserService() {
 
     private fun updatePosition(point: GeoPoint) {
         state.point = point
+        refreshWeather(point)
         val next = Catalog.detect(point, state.region?.id)
         if (next?.id != state.region?.id) {
             state.region = next
+            if (next != null) state.visited = state.visited + next.id
             refreshRecommendations()
             state.message = ""
             if (next != null) announce("${next.spoken}에 들어왔어요. ${next.intro}")
         }
+        // Off the planned road on a real drive: rebuild the track for the rest of the way, at most twice a minute.
+        val plan = state.plan
+        if (plan != null && !state.demo && Route.distanceToPathKm(point, plan.path) > 1.5 &&
+            SystemClock.elapsedRealtime() - lastReplanAt > 30_000) {
+            lastReplanAt = SystemClock.elapsedRealtime()
+            planTo(plan.destination, announceIt = false)
+        }
+    }
+    /** A segment's songs: the driver's own pick first, then the catalog's, then the built-in tracks (which work offline). */
+    private fun songsFor(segment: MusicRegion, limit: Int): List<Track> {
+        val mine = listOfNotNull(app.overrides.get(segment.id))
+        val catalog = if (state.genre == "전체") appleMusic.regionSongs(segment).orEmpty() else emptyList()
+        return (mine + catalog + Catalog.recommend(segment.id, state.genre, state.drive.mood)).distinctBy { it.id }.take(limit)
     }
     private fun refreshRecommendations() {
-        val region = state.region
-        // The place's best-known songs lead the list; the built-in tracks follow and keep working offline.
-        val popular = if (region != null && state.genre == "전체") appleMusic.regionSongs(region).orEmpty() else emptyList()
-        state.recommendations = popular + Catalog.recommend(region?.id, state.genre, state.drive.mood)
-        if (region != null) appleMusic.loadRegionSongs(region) {
-            if (state.region?.id == region.id) { refreshRecommendations(); publish() }
-        }
+        val here = state.region
+        // The drive track: this segment's songs, a couple for the weather, then one song for each segment still ahead.
+        val ahead = state.plan?.segments.orEmpty().filter { it.id != here?.id && it.id !in state.visited }
+        val weatherWords = state.drive.songKeyword.takeIf { here != null && state.genre == "전체" }
+        // On a planned drive each segment gets a short turn so the road ahead stays in view.
+        val planned = state.plan != null
+        val hereSongs = here?.let { songsFor(it, if (planned) 3 else 8) }.orEmpty()
+        val weatherSongs = weatherWords?.let { appleMusic.weatherSongs(it) }.orEmpty().take(if (planned) 1 else 2)
+        // Weather picks sit right after the place's lead songs so they are seen without scrolling.
+        state.recommendations = (hereSongs.take(2) + weatherSongs + hereSongs.drop(2) + ahead.flatMap { songsFor(it, 1) }).distinctBy { it.id }
+        val reload = { refreshRecommendations(); publish() }
+        (listOfNotNull(here) + ahead).forEach { segment -> appleMusic.loadRegionSongs(segment) { reload() } }
+        weatherWords?.let { words -> appleMusic.loadWeatherSongs(words) { if (state.drive.songKeyword == words) reload() } }
         if (isSearchPick(state.current)) {
             notifyChildrenChanged("nearby"); return
         }
@@ -305,8 +374,25 @@ class PlaybackService : MediaBrowserService() {
         }
         session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_MEDIA_ID, track.id)
             .putString(MediaMetadata.METADATA_KEY_TITLE, track.title).putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist)
-            .putString(MediaMetadata.METADATA_KEY_ALBUM, Catalog.regions.find { it.id == track.regionId }?.name ?: track.reason.ifBlank { "길 위의 음악" }).build())
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, Catalog.segments.find { it.id == track.regionId }?.name ?: track.reason.ifBlank { "길 위의 음악" }).build())
+        publishArt(track)
         publish()
+    }
+    /** Cover art for the system's media surfaces (cluster widget, notification): album artwork, or the place drawing. */
+    private fun publishArt(track: Track) {
+        fun put(bitmap: android.graphics.Bitmap) {
+            if (state.current?.id != track.id) return
+            val base = session.controller.metadata ?: return
+            session.setMetadata(MediaMetadata.Builder(base).putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap).build())
+            notifiedKey = null; publish()
+        }
+        val url = track.artworkUrl
+        if (url != null) ArtLoader.load(url, ::put)
+        else {
+            val bitmap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+            PlaceArt(track.regionId, track.genre == Catalog.LIVELY, 0f).apply { setBounds(0, 0, 256, 256); draw(android.graphics.Canvas(bitmap)) }
+            put(bitmap)
+        }
     }
     private fun loadApple(track: Track, autoplay: Boolean) {
         val problem = AppleMusicConfig.tokenProblem() ?: MusicKitBridge.problem()
@@ -325,6 +411,7 @@ class PlaybackService : MediaBrowserService() {
             .putString(MediaMetadata.METADATA_KEY_TITLE, track.title).putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist)
             .putString(MediaMetadata.METADATA_KEY_ALBUM, track.reason)
             .putLong(MediaMetadata.METADATA_KEY_DURATION, state.durationMs.toLong()).build())
+        publishArt(track)
         try {
             applePlayer = MusicKitBridge.player(this, appleMusic.account,
                 onChanged = { if (expectedGeneration == appleGeneration) { syncApplePlayback(); publish() } },
@@ -445,6 +532,7 @@ class PlaybackService : MediaBrowserService() {
         return Notification.Builder(this, "playback").setSmallIcon(R.drawable.ic_music)
             .setContentTitle(state.current?.title ?: "길 위의 음악")
             .setContentText(if (state.current?.appleMusicId != null) state.current?.artist else state.region?.name ?: state.source).setContentIntent(session.controller.sessionActivity)
+            .setLargeIcon(session.controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART))
             .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1, 2))
             .addAction(action("previous", "이전 곡", android.R.drawable.ic_media_previous))
             .addAction(action("play", if (state.playing || state.buffering) "일시정지" else "재생", if (state.playing || state.buffering) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play))
