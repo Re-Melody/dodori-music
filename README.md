@@ -63,6 +63,7 @@ Windows에서는 `car-app/run.ps1`이 에뮬레이터 실행부터 설치까지 
 
 ## 더 보기
 
+- [기술 명세서](car-app/docs/TECH_SPEC.md): 기능 정의, 구조, 매핑 표, 핵심 로직, 외부 연동, 검증 현황, 결정이 필요한 것
 - [개발 문서](car-app/README.md): 구조, 테스트, 남은 작업
 - [Pleos 실행 가이드](car-app/docs/PLEOS.md)
 - [Apple Music 연동 상태](car-app/docs/APPLE_MUSIC.md): 검색·미리듣기 동작. 계정 연결·전체 곡 재생은 개발용 경로로 Pleos 에뮬레이터에서 확인
