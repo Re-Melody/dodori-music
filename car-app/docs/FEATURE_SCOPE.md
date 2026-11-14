@@ -14,7 +14,8 @@
 - 휴대폰 앱, iOS·CarPlay·Android Auto 투사 연동
 - 계정·클라우드 동기화·결제·소셜 로그인
 - Spotify·Apple Music 상용 재생과 계정 인증
-- 내비게이션·전국 지오코딩·교통 경로
+- 차량 내비게이션(NaviHelper) 연동·전국 지오코딩. 목적지는 매핑된 구간 중에서 고르고 경로는 OSRM 공개 서버에서 받습니다
+- 다른 사용자와의 트랙 공유, 구간별 인기 곡(서버 필요)
 - 날씨·역사 이야기·지질·생태계 시각 효과
 - 음성 인식(SpeechToText)·Gleo 전용 function schema, NaviHelper 목적지 연동
 

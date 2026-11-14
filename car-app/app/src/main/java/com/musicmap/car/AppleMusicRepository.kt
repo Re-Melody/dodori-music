@@ -48,32 +48,44 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
     fun more(path: String, callback: (Result<AppleMusicPage>) -> Unit) =
         page(path, path.substringBefore('?').endsWith("/search"), callback)
     fun find(id: String) = knownTracks[id]
+    fun selectList(tracks: List<Track>) { app.state.appleTracks = tracks; app.state.changed() }
 
-    private val regionSongs = mutableMapOf<String, List<Track>>()
-    private val regionLoading = mutableSetOf<String>()
-    /** Songs the catalog ranks highest for the place's keyword; null until loaded. */
-    fun regionSongs(region: MusicRegion): List<Track>? = regionSongs[region.id]
-    /** Loads the place's songs once per session; [onLoaded] runs on the main thread when new songs arrive. */
-    fun loadRegionSongs(region: MusicRegion, onLoaded: () -> Unit) {
-        if (!catalogReady || region.keyword.isBlank() || region.id in regionSongs || !regionLoading.add(region.id)) return
+    private val songCache = mutableMapOf<String, List<Track>>()
+    private val songLoading = mutableSetOf<String>()
+    /** The place's songs: the ones chosen for it in advance, then the catalog's top results for its keyword. Null until loaded. */
+    fun regionSongs(region: MusicRegion): List<Track>? = songCache["place:${region.id}"]
+    fun loadRegionSongs(region: MusicRegion, onLoaded: () -> Unit) =
+        loadSongs("place:${region.id}", region.songIds, region.keyword, 6, onLoaded) { it.copy(regionId = region.id, genre = Catalog.POPULAR) }
+    /** A couple of catalog songs that suit the current weather. */
+    fun weatherSongs(keyword: String): List<Track>? = songCache["weather:$keyword"]
+    fun loadWeatherSongs(keyword: String, onLoaded: () -> Unit) =
+        loadSongs("weather:$keyword", emptyList(), keyword, 2, onLoaded) { it.copy(regionId = Catalog.WEATHER_PICK, genre = Catalog.WEATHER) }
+
+    /** Loads once per session and key; [onLoaded] runs on the main thread when new songs arrive. */
+    private fun loadSongs(key: String, ids: List<String>, keyword: String, limit: Int, onLoaded: () -> Unit, label: (Track) -> Track) {
+        if (!catalogReady || (ids.isEmpty() && keyword.isBlank()) || key in songCache || !songLoading.add(key)) return
         val expected = generation
         executor.execute {
             val result = runCatching {
-                val root = get("/v1/catalog/$storefront/search?types=songs&limit=8&term=${URLEncoder.encode(region.keyword, "UTF-8")}", "")
-                parseTracks(root.optJSONObject("results")?.optJSONObject("songs")?.optJSONArray("data") ?: JSONArray())
-                    .filter { it.previewUrl != null }
-                    .map { it.copy(regionId = region.id, genre = Catalog.POPULAR) }
+                val chosen = if (ids.isEmpty()) emptyList() else runCatching {
+                    require(ids.all { it.matches(Regex("[0-9]+")) })
+                    parseTracks(get("/v1/catalog/$storefront/songs?ids=${ids.joinToString(",")}", "").optJSONArray("data") ?: JSONArray())
+                }.getOrDefault(emptyList())
+                val found = if (keyword.isBlank()) emptyList() else {
+                    val root = get("/v1/catalog/$storefront/search?types=songs&limit=8&term=${URLEncoder.encode(keyword, "UTF-8")}", "")
+                    parseTracks(root.optJSONObject("results")?.optJSONObject("songs")?.optJSONArray("data") ?: JSONArray())
+                }
+                (chosen + found).filter { it.previewUrl != null }.distinctBy { it.id }.take(limit).map(label)
             }
             main.post {
-                regionLoading.remove(region.id)
+                songLoading.remove(key)
                 val songs = result.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@post
                 if (expected != generation) return@post
-                regionSongs[region.id] = songs
+                songCache[key] = songs
                 onLoaded()
             }
         }
     }
-    fun selectList(tracks: List<Track>) { app.state.appleTracks = tracks; app.state.changed() }
 
     private fun page(path: String, search: Boolean, callback: (Result<AppleMusicPage>) -> Unit) {
         if (!search && !connected) { callback(Result.failure(AppleMusicFailure(403, "Apple Music에 먼저 연결해 주세요."))); return }

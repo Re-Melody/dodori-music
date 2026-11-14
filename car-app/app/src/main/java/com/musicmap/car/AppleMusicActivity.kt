@@ -31,6 +31,9 @@ class AppleMusicActivity : Activity() {
     private var restricted = false
     private var guard: CarUxGuard? = null
     private val update: () -> Unit = { renderState() }
+    /** Set when the screen was opened to pick the driver's own song for a segment instead of playing one. */
+    private val assignTo: MusicRegion? by lazy { Catalog.segments.find { it.id == intent.getStringExtra("assign") } }
+    private var unassign: Button? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,7 +81,14 @@ class AppleMusicActivity : Activity() {
 
         val header = kit.row()
         header.addView(kit.circle(Icon.BACK, 48f, Ui.RAISED, Ui.TEXT_SOFT, "돌아가기") { finish() }, kit.lp(kit.u(48f), kit.u(48f)))
-        header.addView(kit.text("Apple Music", T.TITLE), kit.lp(0, -2, 1f) { leftMargin = kit.u(16f) })
+        header.addView(kit.oneLine(kit.text(assignTo?.let { "${it.name}에 지정할 곡" } ?: "Apple Music", T.TITLE)), kit.lp(0, -2, 1f) { leftMargin = kit.u(16f) })
+        assignTo?.let { segment ->
+            unassign = kit.button("지정 해제", Tone.OUTLINE) {
+                app.overrides.clear(segment.id)
+                startForegroundService(Intent(this, PlaybackService::class.java).setAction("refresh"))
+                Toast.makeText(this, "${segment.name}의 지정을 풀었어요", Toast.LENGTH_SHORT).show(); finish()
+            }.also { header.addView(it, kit.lp(-2, kit.u(48f))) }
+        }
         column.addView(header)
 
         val account = kit.row()
@@ -165,6 +175,7 @@ class AppleMusicActivity : Activity() {
                 page = (if (append) page + response.tracks else response.tracks).distinctBy { it.id }
                 next = response.next; drawTracks()
                 feedback.text = if (page.isEmpty()) "표시할 음악이 없어요. 다른 검색어를 입력하거나 Apple Music 보관함에 곡을 추가해 주세요."
+                    else if (assignTo != null) "${page.size}곡 · 곡을 고르면 ${assignTo?.name}의 첫 곡이 돼요"
                     else if (fullPlayback()) "${page.size}곡 · 곡을 선택하면 전체 곡을 재생합니다"
                     else "${page.size}곡 · 곡을 선택하면 30초 미리듣기가 재생됩니다"
             }.onFailure { feedback.text = failureMessage(it) }
@@ -179,7 +190,14 @@ class AppleMusicActivity : Activity() {
                 setPadding(kit.u(8f), kit.u(8f), kit.u(12f), kit.u(8f)); minimumHeight = kit.u(72f)
                 isFocusable = true; contentDescription = "${track.title}, ${track.artist}, ${if (playable(track)) "재생" else "재생 불가"}"
                 setOnClickListener {
-                    if (!restricted && playable(track)) {
+                    val segment = assignTo
+                    if (!restricted && playable(track) && segment != null) {
+                        // The pick leads this segment's list from now on; nothing starts playing here.
+                        app.overrides.set(segment.id, track)
+                        startForegroundService(Intent(this@AppleMusicActivity, PlaybackService::class.java).setAction("refresh"))
+                        Toast.makeText(this@AppleMusicActivity, "${segment.name}에 ${track.title}을(를) 지정했어요", Toast.LENGTH_SHORT).show()
+                        finish()
+                    } else if (!restricted && playable(track)) {
                         repository.selectList(page.filter(::playable))
                         startForegroundService(Intent(this@AppleMusicActivity, PlaybackService::class.java)
                             .setAction("select").putExtra("id", track.id))
@@ -208,6 +226,7 @@ class AppleMusicActivity : Activity() {
             repository.catalogReady -> "검색과 30초 미리듣기를 바로 쓸 수 있어요\n계정을 연결하면 내 보관함과 전체 곡 재생이 열려요"
             else -> "계정을 연결하면 내 보관함과 검색을 쓸 수 있어요\n전체 곡 재생에는 구독이 필요해요"
         }
+        unassign?.visibility = if (assignTo?.let { app.overrides.get(it.id) } != null) View.VISIBLE else View.GONE
         connect.text = if (signingIn) "연결 중…" else if (repository.connected) "연결 해제" else "Apple Music 연결"
         kit.tone(connect, if (repository.connected) Tone.OUTLINE else Tone.PRIMARY)
         connect.isEnabled = !restricted && !busy && !signingIn

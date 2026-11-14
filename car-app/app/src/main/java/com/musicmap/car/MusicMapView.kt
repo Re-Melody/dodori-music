@@ -17,6 +17,10 @@ import kotlin.math.*
 class MusicMapView(context: Context) : View(context) {
     var point: GeoPoint? = null
     var regionId: String? = null
+    /** Road route of the planned drive; null shows the default tour of the landmarks. */
+    var path: List<GeoPoint>? = null
+    /** Segments on the planned drive, so roads off the route stay quiet. */
+    var routeIds: Set<String> = emptySet()
     var zoom = 10
     /** Display scale shared with the activity so labels follow the type scale. */
     var scale = 1f
@@ -80,8 +84,8 @@ class MusicMapView(context: Context) : View(context) {
         }
         // Signature: the route is drawn as a lane marking.
         route.reset()
-        Catalog.regions.forEachIndexed { i, region ->
-            val p = screen(region.point)
+        (path ?: Catalog.regions.map { it.point }).forEachIndexed { i, point ->
+            val p = screen(point)
             if (i == 0) route.moveTo(p.x, p.y) else route.lineTo(p.x, p.y)
         }
         paint.style = Paint.Style.STROKE; paint.strokeCap = Paint.Cap.BUTT
@@ -90,13 +94,16 @@ class MusicMapView(context: Context) : View(context) {
         if (laneDash == null || laneDashFor != d) { laneDash = DashPathEffect(floatArrayOf(12 * d, 8 * d), 0f); laneDashFor = d }
         paint.pathEffect = laneDash; canvas.drawPath(route, paint)
         paint.pathEffect = null; paint.style = Paint.Style.FILL
-        Catalog.regions.forEach { region ->
+        Catalog.segments.forEach { region ->
             val p = screen(region.point)
             val active = region.id == regionId
+            val road = region.kind == SegmentKind.ROAD
             val tint = Ui.placeTint(region.id)
             if (active) { paint.color = Color.argb(56, Color.red(tint), Color.green(tint), Color.blue(tint)); canvas.drawCircle(p.x, p.y, 28 * d, paint) }
-            paint.color = Ui.BASE; canvas.drawCircle(p.x, p.y, 10 * d, paint)
-            paint.color = tint; canvas.drawCircle(p.x, p.y, 7 * d, paint)
+            paint.color = Ui.BASE; canvas.drawCircle(p.x, p.y, (if (road) 8 else 10) * d, paint)
+            paint.color = tint; canvas.drawCircle(p.x, p.y, (if (road) 5 else 7) * d, paint)
+            // A road is named only while it matters: when the car is on it or the drive passes it.
+            if (road && !active && region.id !in routeIds) return@forEach
             paint.textSize = (if (active) 15 else 13) * d; paint.typeface = bold
             val label = region.name
             val tw = paint.measureText(label); val lx = p.x + 14 * d; val ly = p.y - 16 * d
