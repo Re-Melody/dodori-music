@@ -374,7 +374,7 @@ class PlaybackService : MediaBrowserService() {
         }
         session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_MEDIA_ID, track.id)
             .putString(MediaMetadata.METADATA_KEY_TITLE, track.title).putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist)
-            .putString(MediaMetadata.METADATA_KEY_ALBUM, Catalog.segments.find { it.id == track.regionId }?.name ?: track.reason.ifBlank { "길 위의 음악" }).build())
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, Catalog.segments.find { it.id == track.regionId }?.name ?: track.reason.ifBlank { "MoveMe" }).build())
         publishArt(track)
         publish()
     }
@@ -530,7 +530,7 @@ class PlaybackService : MediaBrowserService() {
         fun action(name: String, title: String, icon: Int) = Notification.Action.Builder(icon, title,
             PendingIntent.getService(this, name.hashCode(), Intent(this, PlaybackService::class.java).setAction(name), PendingIntent.FLAG_IMMUTABLE)).build()
         return Notification.Builder(this, "playback").setSmallIcon(R.drawable.ic_music)
-            .setContentTitle(state.current?.title ?: "길 위의 음악")
+            .setContentTitle(state.current?.title ?: "MoveMe")
             .setContentText(if (state.current?.appleMusicId != null) state.current?.artist else state.region?.name ?: state.source).setContentIntent(session.controller.sessionActivity)
             .setLargeIcon(session.controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART))
             .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1, 2))

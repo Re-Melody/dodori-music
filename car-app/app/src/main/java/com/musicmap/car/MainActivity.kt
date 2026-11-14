@@ -480,7 +480,7 @@ class MainActivity : Activity() {
             if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · $tail"
         }
         detailText.show(artistLine ?: "곡을 고르면 여기에서 이어집니다")
-        drivePlace?.show(region?.name ?: "길 위의 음악")
+        drivePlace?.show(region?.name ?: "MoveMe")
         driveTitle?.show(current?.title ?: "재생 버튼을 누르면 이 길의 곡이 시작돼요")
         driveDetail?.show(listOfNotNull(artistLine, state.drive.line.takeIf { it.isNotBlank() }).joinToString("  ·  "))
         driveDetail?.visibility = if (driveDetail?.text.isNullOrEmpty()) View.GONE else View.VISIBLE

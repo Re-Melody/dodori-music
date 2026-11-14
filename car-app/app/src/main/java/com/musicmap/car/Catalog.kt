@@ -29,7 +29,7 @@ object Catalog {
     const val MINE = "내가 지정한 곡"
     /** Region id of songs suggested for the weather rather than for a place. */
     const val WEATHER_PICK = "weather"
-    private const val ARTIST = "길 위의 음악"
+    private const val ARTIST = "MoveMe"
     val regions = listOf(
         MusicRegion("seoul", "서울 · 한강", GeoPoint(37.525, 126.938), 12.0, "서울 한강", "강변을 따라 달리기 좋은 곡을 골랐어요", "한강", songIds = listOf("1610730837")),
         MusicRegion("suwon", "수원 · 화성", GeoPoint(37.286, 127.012), 8.0, "수원 화성", "성곽길에 어울리는 곡으로 이어갈게요", "수원", songIds = listOf("1477149763")),
