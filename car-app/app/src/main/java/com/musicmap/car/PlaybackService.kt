@@ -35,6 +35,8 @@ class PlaybackService : MediaBrowserService() {
     private var vehicleContext = DriveContext()
     private var announcing = false
     private var signalsStarted = false
+    private var ticks = 0
+    private var notifiedKey: String? = null
     private val preferences by lazy { getSharedPreferences("music-map", MODE_PRIVATE) }
     private val tick = object : Runnable {
         override fun run() {
@@ -44,9 +46,15 @@ class PlaybackService : MediaBrowserService() {
                 applyDemoWeather()
                 if (state.demoProgress >= 1.0) { state.demo = false; state.source = "둘러보기 도착"; setContext(vehicleContext) }
             }
+            val positionBefore = state.positionMs
             if (ready) player?.let { state.positionMs = it.currentPosition; state.durationMs = it.duration }
             if (applePlayer != null) syncApplePlayback()
-            publish()
+            // Once a second is only worth a screen refresh when something moved. The media session
+            // extrapolates position from its last state, so it is refreshed far less often.
+            if (state.demo || state.positionMs != positionBefore || applePlayer != null) {
+                if (++ticks % 10 == 0) publishSession()
+                state.changed()
+            }
             handler.postDelayed(this, 1000)
         }
     }
@@ -392,7 +400,7 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun stopAll() {
         stopPlayback(); stopPosition(); announcer?.stop(); state.source = "위치 수신 중지"; state.drive = vehicleContext
-        stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf(); publish()
+        stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; notifiedKey = null; stopSelf(); publish()
     }
     private fun skip(direction: Int) {
         if (direction < 0 && applePlayer != null && state.positionMs > 3000) { appleAction { it.seek(0) }; return }
@@ -413,6 +421,16 @@ class PlaybackService : MediaBrowserService() {
     }
     private fun stopPosition() { locationSource?.stop(); locationSource = null; state.demo = false }
     private fun publish() {
+        publishSession()
+        state.changed()
+        // Rebuilding and reposting the notification is an IPC round trip; do it only when its content changed.
+        val key = "${state.current?.id}|${state.playing}|${state.buffering}|${state.region?.id}|${state.source}"
+        if (foreground && key != notifiedKey) {
+            notifiedKey = key
+            getSystemService(NotificationManager::class.java).notify(1, notification())
+        }
+    }
+    private fun publishSession() {
         val playbackState = if (state.buffering) PlaybackState.STATE_BUFFERING else if (state.playing) PlaybackState.STATE_PLAYING else if (stopped) PlaybackState.STATE_STOPPED else if (state.current == null) PlaybackState.STATE_NONE else PlaybackState.STATE_PAUSED
         session.setPlaybackState(PlaybackState.Builder().setActions(
             PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP or
@@ -420,8 +438,6 @@ class PlaybackService : MediaBrowserService() {
                 PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH or PlaybackState.ACTION_SEEK_TO)
             .setState(playbackState, state.positionMs.toLong(), if (state.playing) 1f else 0f)
             .setActiveQueueItemId(if (index in queue.indices) index.toLong() else MediaSession.QueueItem.UNKNOWN_ID.toLong()).build())
-        state.changed()
-        if (foreground) getSystemService(NotificationManager::class.java).notify(1, notification())
     }
     private fun notification(): Notification {
         fun action(name: String, title: String, icon: Int) = Notification.Action.Builder(icon, title,
