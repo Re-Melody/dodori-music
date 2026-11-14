@@ -46,7 +46,7 @@ object Catalog {
         MusicRegion("gangnam", "강남대로", GeoPoint(37.4979, 127.0276), 1.5, "강남대로", "강남 하면 떠오르는 그 곡이에요",
             "", SegmentKind.ROAD, listOf("1339074799")),
         MusicRegion("jisung", "동탄지성로", GeoPoint(37.2252, 127.0486), 1.2, "동탄지성로", "박지성 선수의 응원가를 틀게요",
-            "", SegmentKind.ROAD, listOf("1522374158", "1705661056"))
+            "", SegmentKind.ROAD, listOf("1705661056"))
     )
     /** Every mapped segment: landmarks first, then roads. */
     val segments: List<MusicRegion> get() = regions + roads
