@@ -20,6 +20,9 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
     private var generation = 0
     private val knownTracks = linkedMapOf<String, Track>()
     val connected get() = account.userToken.isNotEmpty()
+    /** Catalog search and previews need only the developer token; the library and full songs need an account. */
+    val catalogReady get() = AppleMusicConfig.tokenProblem() == null
+    private val storefront get() = account.storefront.ifEmpty { "kr" }
 
     fun connect(token: String, callback: (Result<Unit>) -> Unit) = request(callback, {
         val data = get("/v1/me/storefront", token).getJSONArray("data")
@@ -37,17 +40,43 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
     fun search(term: String, callback: (Result<AppleMusicPage>) -> Unit) {
         val query = term.trim().take(200)
         if (query.isEmpty()) { callback(Result.success(AppleMusicPage(emptyList(), null))); return }
-        page("/v1/catalog/${account.storefront}/search?types=songs&limit=25&term=${URLEncoder.encode(query, "UTF-8")}", true, callback)
+        page("/v1/catalog/$storefront/search?types=songs&limit=25&term=${URLEncoder.encode(query, "UTF-8")}", true, callback)
     }
     fun library(callback: (Result<AppleMusicPage>) -> Unit) =
-        page("/v1/me/library/songs?include=catalog&limit=25", false, callback)
+        if (!connected) callback(Result.failure(AppleMusicFailure(403, "보관함은 Apple Music 계정을 연결한 뒤 볼 수 있어요.")))
+        else page("/v1/me/library/songs?include=catalog&limit=25", false, callback)
     fun more(path: String, callback: (Result<AppleMusicPage>) -> Unit) =
         page(path, path.substringBefore('?').endsWith("/search"), callback)
     fun find(id: String) = knownTracks[id]
+
+    private val regionSongs = mutableMapOf<String, List<Track>>()
+    private val regionLoading = mutableSetOf<String>()
+    /** Songs the catalog ranks highest for the place's keyword; null until loaded. */
+    fun regionSongs(region: MusicRegion): List<Track>? = regionSongs[region.id]
+    /** Loads the place's songs once per session; [onLoaded] runs on the main thread when new songs arrive. */
+    fun loadRegionSongs(region: MusicRegion, onLoaded: () -> Unit) {
+        if (!catalogReady || region.keyword.isBlank() || region.id in regionSongs || !regionLoading.add(region.id)) return
+        val expected = generation
+        executor.execute {
+            val result = runCatching {
+                val root = get("/v1/catalog/$storefront/search?types=songs&limit=8&term=${URLEncoder.encode(region.keyword, "UTF-8")}", "")
+                parseTracks(root.optJSONObject("results")?.optJSONObject("songs")?.optJSONArray("data") ?: JSONArray())
+                    .filter { it.previewUrl != null }
+                    .map { it.copy(regionId = region.id, genre = Catalog.POPULAR) }
+            }
+            main.post {
+                regionLoading.remove(region.id)
+                val songs = result.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@post
+                if (expected != generation) return@post
+                regionSongs[region.id] = songs
+                onLoaded()
+            }
+        }
+    }
     fun selectList(tracks: List<Track>) { app.state.appleTracks = tracks; app.state.changed() }
 
     private fun page(path: String, search: Boolean, callback: (Result<AppleMusicPage>) -> Unit) {
-        if (!connected) { callback(Result.failure(AppleMusicFailure(403, "Apple Music에 먼저 연결해 주세요."))); return }
+        if (!search && !connected) { callback(Result.failure(AppleMusicFailure(403, "Apple Music에 먼저 연결해 주세요."))); return }
         request(callback, {
             val root = get(path)
             val resource = if (search) root.optJSONObject("results")?.optJSONObject("songs") ?: JSONObject() else root
@@ -75,7 +104,7 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 15000; connection.readTimeout = 20000
             connection.setRequestProperty("Authorization", "Bearer ${AppleMusicConfig.developerToken}")
-            connection.setRequestProperty("Music-User-Token", token)
+            if (token.isNotEmpty()) connection.setRequestProperty("Music-User-Token", token)
             connection.setRequestProperty("Accept", "application/json")
             when (val status = connection.responseCode) {
                 in 200..299 -> return connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
@@ -98,7 +127,10 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
             add(Track("apple:${item.getString("id")}", attributes.optString("name", "제목 없음"),
                 attributes.optString("artistName", "아티스트 미상"), "apple-music", "Apple Music",
                 if (playableId == null) "이 곡은 Apple Music 카탈로그에서 재생할 수 없어요" else attributes.optString("albumName", "Apple Music"),
-                "", playableId, attributes.optInt("durationInMillis", 0)))
+                "", playableId, attributes.optInt("durationInMillis", 0),
+                attributes.optJSONArray("previews")?.optJSONObject(0)?.optString("url")?.takeIf { it.startsWith("https://") },
+                attributes.optJSONObject("artwork")?.optString("url")?.takeIf { it.startsWith("https://") }
+                    ?.replace("{w}", "300")?.replace("{h}", "300")))
         }
     }
 }

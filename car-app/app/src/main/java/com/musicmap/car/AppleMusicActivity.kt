@@ -3,9 +3,7 @@ package com.musicmap.car
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
+import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -16,6 +14,7 @@ import android.widget.*
 class AppleMusicActivity : Activity() {
     private val app get() = application as MusicMapApplication
     private val repository get() = app.appleMusic
+    private lateinit var kit: UiKit
     private lateinit var status: TextView
     private lateinit var feedback: TextView
     private lateinit var nowPlaying: TextView
@@ -36,6 +35,8 @@ class AppleMusicActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         signingIn = savedInstanceState?.getBoolean("signingIn") ?: false
+        val config = resources.configuration
+        kit = UiKit(this, (minOf(config.screenWidthDp, config.screenHeightDp) / 600f).coerceIn(1f, 1.5f))
         window.statusBarColor = Ui.BASE; window.navigationBarColor = Ui.BASE
         buildUi()
         if (packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)) {
@@ -44,6 +45,8 @@ class AppleMusicActivity : Activity() {
         }
         renderState()
         if (repository.connected && !signingIn) loadLibrary()
+        else if (!restricted && repository.catalogReady) feedback.text = "곡이나 아티스트를 검색하면 30초 미리듣기로 바로 들을 수 있어요"
+        renderState()
     }
     override fun onStart() { super.onStart(); app.state.listeners.add(update); renderState() }
     override fun onStop() { app.state.listeners.remove(update); super.onStop() }
@@ -52,54 +55,49 @@ class AppleMusicActivity : Activity() {
         outState.putBoolean("signingIn", signingIn); super.onSaveInstanceState(outState)
     }
 
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    private fun label(value: String, size: Float = 16f, color: Int = Ui.TEXT) = TextView(this).apply {
-        text = value; textSize = size; setTextColor(color)
-    }
-    private fun button(value: String, action: () -> Unit) = Button(this).apply {
-        text = value; isAllCaps = false; textSize = 16f; minHeight = dp(48)
-        setTextColor(Ui.TEXT); backgroundTintList = ColorStateList.valueOf(Ui.RAISED)
-        setOnClickListener { action() }
-    }
     private fun buildUi() {
-        val root = column().apply { setBackgroundColor(Ui.BASE); setPadding(dp(24), dp(16), dp(24), dp(16)) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Ui.BASE) }
         setContentView(root)
-        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(button("돌아가기") { finish() }, LinearLayout.LayoutParams(-2, dp(56)))
-        header.addView(label("Apple Music", 26f).apply {
-            typeface = Typeface.DEFAULT_BOLD; setPadding(dp(16), 0, 0, 0)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(header)
-        root.addView(label("계정을 연결하고, 좋아하는 음악을 여기서 들어보세요.", 16f, Ui.TEXT_MUTED).apply {
-            setPadding(0, dp(16), 0, dp(8))
-        })
-        val accountRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        status = label("", 16f, Ui.TEXT_MUTED)
-        accountRow.addView(status, LinearLayout.LayoutParams(0, -2, 1f))
-        connect = button("연결") { if (repository.connected) disconnect() else signIn() }
-        accountRow.addView(connect, LinearLayout.LayoutParams(-2, dp(56)))
-        root.addView(accountRow)
+        // One readable column instead of controls stretched across a wide car display.
+        val column = kit.column().apply { setPadding(kit.u(24f), kit.u(16f), kit.u(24f), kit.u(16f)) }
+        val maxWidth = kit.u(760f)
+        val screenW = kit.dp(resources.configuration.screenWidthDp.toFloat())
+        root.addView(column, FrameLayout.LayoutParams(minOf(maxWidth, screenW), -1, Gravity.CENTER_HORIZONTAL))
+
+        val header = kit.row()
+        header.addView(kit.circle(Icon.BACK, 48f, Ui.RAISED, Ui.TEXT_SOFT, "돌아가기") { finish() }, kit.lp(kit.u(48f), kit.u(48f)))
+        header.addView(kit.text("Apple Music", T.TITLE), kit.lp(0, -2, 1f) { leftMargin = kit.u(16f) })
+        column.addView(header)
+
+        val account = kit.row()
+        status = kit.text("", T.BODY, Ui.TEXT_SOFT)
+        account.addView(status, kit.lp(0, -2, 1f) { rightMargin = kit.u(16f) })
+        connect = kit.button("연결", Tone.PRIMARY) { if (repository.connected) disconnect() else signIn() }
+        account.addView(connect, kit.lp(-2, kit.u(48f)))
+        column.addView(account, kit.lp(-1, -2) { topMargin = kit.u(24f) })
+
+        actions = kit.row()
         query = EditText(this).apply {
-            hint = "곡 또는 아티스트 검색"; contentDescription = "Apple Music 곡 또는 아티스트 검색"
-            setTextColor(Ui.TEXT); setHintTextColor(Ui.TEXT_MUTED); textSize = 18f
+            hint = "곡 또는 아티스트"; contentDescription = "Apple Music 곡 또는 아티스트 검색"
+            setTextColor(Ui.TEXT); setHintTextColor(Ui.TEXT_MUTED); textSize = 16f * kit.s
+            background = kit.shape(Ui.RAISED, 10f, Ui.HAIRLINE); setPadding(kit.u(16f), 0, kit.u(16f), 0)
             setSingleLine(); imeOptions = EditorInfo.IME_ACTION_SEARCH; inputType = android.text.InputType.TYPE_CLASS_TEXT
             setOnEditorActionListener { _, action, _ -> if (action == EditorInfo.IME_ACTION_SEARCH) { search(); true } else false }
         }
-        root.addView(query, LinearLayout.LayoutParams(-1, dp(64)))
-        actions = LinearLayout(this)
-        actions.addView(button("검색") { search() }, LinearLayout.LayoutParams(0, dp(56), 1f))
-        actions.addView(button("내 Apple Music 보관함") { loadLibrary() }, LinearLayout.LayoutParams(0, dp(56), 1f))
-        root.addView(actions)
-        feedback = label("", 16f, Ui.TEXT_MUTED).apply { setPadding(0, dp(12), 0, dp(12)); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
-        root.addView(feedback)
-        val scroll = ScrollView(this).apply { isFillViewport = true }
-        rows = column(); scroll.addView(rows)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        more = button("더 불러오기") { next?.let { path -> fetch(append = true) { callback -> repository.more(path, callback) } } }
-        root.addView(more, LinearLayout.LayoutParams(-1, dp(56)))
-        nowPlaying = label("", 16f, Ui.TEXT_SOFT).apply { setPadding(0, dp(12), 0, 0) }
-        root.addView(nowPlaying)
+        actions.addView(query, kit.lp(0, kit.u(48f), 1f))
+        actions.addView(kit.button("검색", Tone.QUIET, Icon.SEARCH) { search() }, kit.lp(-2, kit.u(48f)) { leftMargin = kit.u(8f) })
+        actions.addView(kit.button("내 보관함", Tone.QUIET) { loadLibrary() }, kit.lp(-2, kit.u(48f)) { leftMargin = kit.u(8f) })
+        column.addView(actions, kit.lp(-1, -2) { topMargin = kit.u(16f) })
+
+        feedback = kit.text("", T.CAPTION, Ui.TEXT_MUTED).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        column.addView(feedback, kit.lp(-1, -2) { topMargin = kit.u(16f) })
+        val scroll = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
+        rows = kit.column(); scroll.addView(rows)
+        column.addView(scroll, kit.lp(-1, 0, 1f) { topMargin = kit.u(12f); leftMargin = -kit.u(8f); rightMargin = -kit.u(8f) })
+        more = kit.button("더 불러오기", Tone.OUTLINE) { next?.let { path -> fetch(append = true) { callback -> repository.more(path, callback) } } }
+        column.addView(more, kit.lp(-1, kit.u(48f)) { topMargin = kit.u(8f) })
+        nowPlaying = kit.oneLine(kit.text("", T.CAPTION, Ui.TEXT_SOFT))
+        column.addView(nowPlaying, kit.lp(-1, -2) { topMargin = kit.u(12f) })
     }
 
     private fun signIn() {
@@ -145,7 +143,7 @@ class AppleMusicActivity : Activity() {
     private fun loadLibrary() = fetch { callback -> repository.library(callback) }
     private fun fetch(append: Boolean = false, request: ((Result<AppleMusicPage>) -> Unit) -> Unit) {
         if (restricted || busy || signingIn) return
-        if (!repository.connected) { feedback.text = "Apple Music에 먼저 연결해 주세요."; return }
+        if (!repository.connected && !repository.catalogReady) { feedback.text = AppleMusicConfig.tokenProblem() ?: "Apple Music에 먼저 연결해 주세요."; return }
         busy = true; feedback.text = "음악을 불러오고 있어요…"; renderState()
         val id = ++requestId
         request { result ->
@@ -155,7 +153,8 @@ class AppleMusicActivity : Activity() {
                 page = (if (append) page + response.tracks else response.tracks).distinctBy { it.id }
                 next = response.next; drawTracks()
                 feedback.text = if (page.isEmpty()) "표시할 음악이 없어요. 다른 검색어를 입력하거나 Apple Music 보관함에 곡을 추가해 주세요."
-                    else "${page.size}곡 · 곡을 선택하면 전체 곡을 재생합니다. Apple Music 구독이 필요해요."
+                    else if (fullPlayback()) "${page.size}곡 · 곡을 선택하면 전체 곡을 재생합니다"
+                    else "${page.size}곡 · 곡을 선택하면 30초 미리듣기가 재생됩니다"
             }.onFailure { feedback.text = failureMessage(it) }
             renderState()
         }
@@ -163,42 +162,54 @@ class AppleMusicActivity : Activity() {
     private fun drawTracks() {
         rows.removeAllViews()
         page.forEach { track ->
-            val view = column().apply {
-                setPadding(dp(16), dp(12), dp(16), dp(12)); minimumHeight = dp(80)
-                background = GradientDrawable().apply { setColor(Ui.RAISED); cornerRadius = dp(8).toFloat() }
-                addView(label(track.title, 18f).apply { typeface = Typeface.DEFAULT_BOLD })
-                addView(label("${track.artist} · ${track.reason}", 16f, Ui.TEXT_MUTED))
-                isFocusable = true; contentDescription = "${track.title}, ${track.artist}, ${if (track.appleMusicId == null) "재생 불가" else "재생"}"
+            val view = kit.row().apply {
+                background = kit.surface(Color.TRANSPARENT, 10f)
+                setPadding(kit.u(8f), kit.u(8f), kit.u(12f), kit.u(8f)); minimumHeight = kit.u(72f)
+                isFocusable = true; contentDescription = "${track.title}, ${track.artist}, ${if (playable(track)) "재생" else "재생 불가"}"
                 setOnClickListener {
-                    if (!restricted && repository.connected && track.appleMusicId != null) {
-                        repository.selectList(page.filter { it.appleMusicId != null })
+                    if (!restricted && playable(track)) {
+                        repository.selectList(page.filter(::playable))
                         startForegroundService(Intent(this@AppleMusicActivity, PlaybackService::class.java)
                             .setAction("select").putExtra("id", track.id))
                         finish()
                     }
                 }
-                tag = track.appleMusicId != null
+                tag = playable(track)
             }
-            rows.addView(view, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+            view.addView(kit.art(track), kit.lp(kit.u(56f), kit.u(56f)) { rightMargin = kit.u(16f) })
+            val info = kit.column()
+            info.addView(kit.oneLine(kit.text(track.title, T.BODY_STRONG)))
+            info.addView(kit.oneLine(kit.text("${track.artist} · ${track.reason}", T.CAPTION, Ui.TEXT_MUTED)), kit.lp(-1, -2) { topMargin = kit.u(4f) })
+            view.addView(info, kit.lp(0, -2, 1f))
+            rows.addView(view, kit.lp(-1, -2) { bottomMargin = kit.u(4f) })
         }
     }
+    private fun fullPlayback() = repository.connected && MusicKitBridge.problem() == null
+    private fun playable(track: Track) = if (fullPlayback()) track.appleMusicId != null else track.previewUrl != null
     private fun failureMessage(error: Throwable) = if (error is AppleMusicFailure) error.message
         else "음악을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요."
     private fun renderState() {
         if (!::status.isInitialized) return
         status.text = when {
-            restricted -> "주차 후 계정 연결과 검색을 이용해 주세요."
+            restricted -> "주차 후 계정 연결과 검색을 이용해 주세요"
             repository.connected -> "연결됨 · ${repository.account.storefront.uppercase()}"
-            else -> "연결되지 않음 · 전체 곡 재생에는 구독이 필요해요."
+            repository.catalogReady -> "검색과 30초 미리듣기를 바로 쓸 수 있어요\n계정을 연결하면 내 보관함과 전체 곡 재생이 열려요"
+            else -> "계정을 연결하면 내 보관함과 검색을 쓸 수 있어요\n전체 곡 재생에는 구독이 필요해요"
         }
         connect.text = if (signingIn) "연결 중…" else if (repository.connected) "연결 해제" else "Apple Music 연결"
+        kit.tone(connect, if (repository.connected) Tone.OUTLINE else Tone.PRIMARY)
         connect.isEnabled = !restricted && !busy && !signingIn
-        query.isEnabled = !restricted && !busy && !signingIn && repository.connected
-        for (i in 0 until actions.childCount) actions.getChildAt(i).isEnabled = query.isEnabled
+        connect.alpha = if (connect.isEnabled) 1f else .4f
+        query.isEnabled = !restricted && !busy && !signingIn && (repository.connected || repository.catalogReady)
+        for (i in 0 until actions.childCount) actions.getChildAt(i).apply {
+            isEnabled = query.isEnabled && (i < 2 || repository.connected); alpha = if (isEnabled) 1f else .4f
+        }
+        feedback.visibility = if (feedback.text.isEmpty()) View.GONE else View.VISIBLE
         more.visibility = if (next == null) View.GONE else View.VISIBLE
         more.isEnabled = query.isEnabled
         for (i in 0 until rows.childCount) rows.getChildAt(i).apply { isEnabled = !restricted && !busy && tag == true; alpha = if (isEnabled) 1f else .45f }
-        nowPlaying.text = app.state.current?.let { "${if (app.state.playing) "재생 중" else "선택한 곡"} · ${it.title} — ${it.artist}" } ?: "곡을 선택하기 전에는 자동 재생하지 않습니다."
+        nowPlaying.text = app.state.current?.let { "${if (app.state.playing) "재생 중" else "선택한 곡"} · ${it.title} — ${it.artist}" } ?: ""
+        nowPlaying.visibility = if (nowPlaying.text.isEmpty()) View.GONE else View.VISIBLE
     }
     companion object { private const val SIGN_IN = 310 }
 }
