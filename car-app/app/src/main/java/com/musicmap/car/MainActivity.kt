@@ -476,7 +476,7 @@ class MainActivity : Activity() {
         }
         currentText.show(current?.title ?: "재생 중인 곡이 없어요")
         val artistLine = current?.let {
-            val tail = if (it.genre == Catalog.POPULAR) Catalog.regions.firstOrNull { r -> r.id == it.regionId }?.name ?: it.genre else it.genre
+            val tail = if (it.genre == Catalog.POPULAR) Catalog.segments.firstOrNull { r -> r.id == it.regionId }?.name ?: it.genre else it.genre
             if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · $tail"
         }
         detailText.show(artistLine ?: "곡을 고르면 여기에서 이어집니다")
