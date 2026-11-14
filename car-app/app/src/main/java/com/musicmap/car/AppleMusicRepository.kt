@@ -48,6 +48,31 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
     fun more(path: String, callback: (Result<AppleMusicPage>) -> Unit) =
         page(path, path.substringBefore('?').endsWith("/search"), callback)
     fun find(id: String) = knownTracks[id]
+
+    private val regionSongs = mutableMapOf<String, List<Track>>()
+    private val regionLoading = mutableSetOf<String>()
+    /** Songs the catalog ranks highest for the place's keyword; null until loaded. */
+    fun regionSongs(region: MusicRegion): List<Track>? = regionSongs[region.id]
+    /** Loads the place's songs once per session; [onLoaded] runs on the main thread when new songs arrive. */
+    fun loadRegionSongs(region: MusicRegion, onLoaded: () -> Unit) {
+        if (!catalogReady || region.keyword.isBlank() || region.id in regionSongs || !regionLoading.add(region.id)) return
+        val expected = generation
+        executor.execute {
+            val result = runCatching {
+                val root = get("/v1/catalog/$storefront/search?types=songs&limit=8&term=${URLEncoder.encode(region.keyword, "UTF-8")}", "")
+                parseTracks(root.optJSONObject("results")?.optJSONObject("songs")?.optJSONArray("data") ?: JSONArray())
+                    .filter { it.previewUrl != null }
+                    .map { it.copy(regionId = region.id, genre = Catalog.POPULAR) }
+            }
+            main.post {
+                regionLoading.remove(region.id)
+                val songs = result.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@post
+                if (expected != generation) return@post
+                regionSongs[region.id] = songs
+                onLoaded()
+            }
+        }
+    }
     fun selectList(tracks: List<Track>) { app.state.appleTracks = tracks; app.state.changed() }
 
     private fun page(path: String, search: Boolean, callback: (Result<AppleMusicPage>) -> Unit) {

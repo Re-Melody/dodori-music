@@ -98,7 +98,7 @@ class PleosAnnouncer(context: Context) : Announcer {
         override fun onStart() { main.post { onSpeaking(true) } }
         override fun onReady() = Unit
         override fun onDone() { main.post { onSpeaking(false) } }
-        override fun onError(error: ErrorType) { main.post { onSpeaking(false) } }
+        override fun onError(error: ErrorType) { android.util.Log.w("DriveAnnouncer", "Pleos TTS error: $error"); main.post { onSpeaking(false) } }
         override fun onStop() { main.post { onSpeaking(false) } }
         override fun onUpdatedRms(rms: Double) = Unit
     }
@@ -107,18 +107,19 @@ class PleosAnnouncer(context: Context) : Announcer {
         try {
             val engine = TextToSpeech(app, Mode.ON_DEVICE)
             tts = engine
-            engine.addEventListener(events)
+            // Order matters: the SDK binds its service in initialize(); listeners can only be added afterwards.
             engine.initialize(object : OnInitializeListener {
                 override fun onSuccess() {
                     main.post {
-                        runCatching { engine.setLocale(Locale.KOREAN) }
+                        runCatching { engine.addEventListener(events) }
+                        runCatching { engine.setLocale(Locale.KOREA) }
                         ready = true
                         pending?.let { pending = null; speak(it) }
                     }
                 }
-                override fun onFailure(error: ErrorType) { main.post { useFallback() } }
+                override fun onFailure(error: ErrorType) { android.util.Log.w("DriveAnnouncer", "Pleos TTS init failed: $error"); main.post { useFallback() } }
             })
-        } catch (_: Throwable) { useFallback() }
+        } catch (e: Throwable) { android.util.Log.w("DriveAnnouncer", "Pleos TTS unavailable", e); useFallback() }
     }
     private fun useFallback() {
         if (fallback != null) return
@@ -128,7 +129,7 @@ class PleosAnnouncer(context: Context) : Announcer {
     override fun speak(text: String) {
         fallback?.let { it.speak(text); return }
         if (!ready) { pending = text; return }
-        try { tts?.speak(text) } catch (_: Throwable) { pending = text; useFallback() }
+        try { tts?.speak(text) } catch (e: Throwable) { android.util.Log.w("DriveAnnouncer", "Pleos TTS speak failed", e); pending = text; useFallback() }
     }
     override fun stop() {
         pending = null

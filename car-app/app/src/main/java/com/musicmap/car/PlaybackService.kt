@@ -177,7 +177,7 @@ class PlaybackService : MediaBrowserService() {
             "stop" -> stopAll()
             "select" -> findTrack(intent.getStringExtra("id"))?.let(::select)
             "apple_disconnect" -> {
-                if (state.current?.appleMusicId != null) {
+                if (isSearchPick(state.current)) {
                     stopPlayback(); state.current = null; queue = emptyList(); index = -1; publishQueue()
                     session.setMetadata(null)
                     state.message = "Apple Music 연결을 해제했어요"
@@ -233,8 +233,14 @@ class PlaybackService : MediaBrowserService() {
         }
     }
     private fun refreshRecommendations() {
-        state.recommendations = Catalog.recommend(state.region?.id, state.genre, state.drive.mood)
-        if (state.current?.appleMusicId != null) {
+        val region = state.region
+        // The place's best-known songs lead the list; the built-in tracks follow and keep working offline.
+        val popular = if (region != null && state.genre == "전체") appleMusic.regionSongs(region).orEmpty() else emptyList()
+        state.recommendations = popular + Catalog.recommend(region?.id, state.genre, state.drive.mood)
+        if (region != null) appleMusic.loadRegionSongs(region) {
+            if (state.region?.id == region.id) { refreshRecommendations(); publish() }
+        }
+        if (isSearchPick(state.current)) {
             notifyChildrenChanged("nearby"); return
         }
         queue = Catalog.queueFor(state.current, state.recommendations)
@@ -246,13 +252,15 @@ class PlaybackService : MediaBrowserService() {
         session.setQueue(queue.mapIndexed { i, track -> MediaSession.QueueItem(mediaItem(track).description, i.toLong()) })
     }
     private fun select(track: Track) {
-        queue = if (track.appleMusicId != null) state.appleTracks.ifEmpty { listOf(track) }
-            else if (track in state.recommendations) state.recommendations else Catalog.tracks
+        queue = if (track in state.recommendations) state.recommendations
+            else if (track.appleMusicId != null) state.appleTracks.ifEmpty { listOf(track) } else Catalog.tracks
         if (track !in queue) queue = listOf(track)
         index = queue.indexOf(track); publishQueue(); load(track, true)
         notifyChildrenChanged("apple")
     }
-    private fun findTrack(id: String?): Track? = (Catalog.tracks.find { it.id == id }
+    /** A song the user picked on the Apple Music screen, as opposed to one recommended for a place. */
+    private fun isSearchPick(track: Track?) = track?.regionId == "apple-music"
+    private fun findTrack(id: String?): Track? = (Catalog.tracks.find { it.id == id } ?: state.recommendations.find { it.id == id }
         ?: state.appleTracks.find { it.id == id } ?: id?.let { appleMusic.find(it) })
         ?.takeIf { !it.id.startsWith("apple:") || it.appleMusicId != null }
     /** Full songs go through MusicKit when an account is connected; otherwise the 30-second preview plays. */

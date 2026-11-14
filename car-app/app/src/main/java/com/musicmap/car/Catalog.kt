@@ -3,9 +3,12 @@ package com.musicmap.car
 import kotlin.math.*
 
 data class GeoPoint(val lat: Double, val lon: Double)
-/** [spoken] and [intro] are read aloud when the car enters the region. */
+/**
+ * [spoken] and [intro] are read aloud when the car enters the region.
+ * [keyword] finds the place's well-known songs in the streaming catalog.
+ */
 data class MusicRegion(val id: String, val name: String, val point: GeoPoint, val radiusKm: Double,
-                       val spoken: String = name, val intro: String = "")
+                       val spoken: String = name, val intro: String = "", val keyword: String = "")
 data class Track(val id: String, val title: String, val artist: String, val regionId: String,
                  val genre: String, val reason: String, val asset: String,
                  val appleMusicId: String? = null, val durationMs: Int = 0,
@@ -14,11 +17,12 @@ data class Track(val id: String, val title: String, val artist: String, val regi
 object Catalog {
     const val CALM = "차분하게"
     const val LIVELY = "경쾌하게"
+    const val POPULAR = "인기곡"
     private const val ARTIST = "길 위의 음악"
     val regions = listOf(
-        MusicRegion("seoul", "서울 · 한강", GeoPoint(37.525, 126.938), 12.0, "서울 한강", "강변을 따라 달리기 좋은 곡을 골랐어요"),
-        MusicRegion("suwon", "수원 · 화성", GeoPoint(37.286, 127.012), 8.0, "수원 화성", "성곽길에 어울리는 곡으로 이어갈게요"),
-        MusicRegion("yongin", "용인 · 호수", GeoPoint(37.241, 127.177), 10.0, "용인 호수", "호숫가 풍경에 맞는 곡을 틀어 드릴게요")
+        MusicRegion("seoul", "서울 · 한강", GeoPoint(37.525, 126.938), 12.0, "서울 한강", "강변을 따라 달리기 좋은 곡을 골랐어요", "한강"),
+        MusicRegion("suwon", "수원 · 화성", GeoPoint(37.286, 127.012), 8.0, "수원 화성", "성곽길에 어울리는 곡으로 이어갈게요", "수원"),
+        MusicRegion("yongin", "용인 · 호수", GeoPoint(37.241, 127.177), 10.0, "용인 호수", "호숫가 풍경에 맞는 곡을 틀어 드릴게요", "호수")
     )
     val tracks = listOf(
         Track("river", "강변의 오후", ARTIST, "seoul", CALM, "한강을 따라 달릴 때", "river.wav"),

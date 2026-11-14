@@ -36,7 +36,7 @@ class AndroidAnnouncer(context: Context) : Announcer {
         engine = TextToSpeech(context.applicationContext) { status ->
             if (status != TextToSpeech.SUCCESS) { failed = true; return@TextToSpeech }
             runCatching {
-                engine.language = Locale.KOREAN
+                engine.language = Locale.KOREA
                 engine.setAudioAttributes(AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())

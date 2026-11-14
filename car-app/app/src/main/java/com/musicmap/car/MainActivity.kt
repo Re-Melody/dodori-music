@@ -333,7 +333,8 @@ class MainActivity : Activity() {
         val info = kit.column()
         info.addView(kit.oneLine(kit.text(track.title, T.BODY_STRONG, if (current) Ui.ACCENT else Ui.TEXT)))
         val place = Catalog.regions.firstOrNull { it.id == track.regionId }?.name
-        val detail = if (favoritesOnly && place != null) "$place · ${track.reason}" else track.reason
+        val detail = if (track.appleMusicId != null) "${track.artist} · ${track.reason}"
+            else if (favoritesOnly && place != null) "$place · ${track.reason}" else track.reason
         info.addView(kit.oneLine(kit.text(detail, T.CAPTION, Ui.TEXT_MUTED)), kit.lp(-1, -2) { topMargin = kit.u(4f) })
         row.addView(info, kit.lp(0, -2, 1f))
         if (saved) row.addView(ImageView(this).apply { setImageDrawable(IconDrawable(Icon.HEART_FILLED, Ui.TEXT_MUTED)); contentDescription = "보관함에 저장됨" }, kit.lp(kit.u(18f), kit.u(18f)) { leftMargin = kit.u(12f) })
@@ -410,7 +411,10 @@ class MainActivity : Activity() {
             nowArt.addView(kit.art(current), FrameLayout.LayoutParams(-1, -1))
         }
         currentText.text = current?.title ?: "재생 중인 곡이 없어요"
-        val artistLine = current?.let { if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · ${it.genre}" }
+        val artistLine = current?.let {
+            val tail = if (it.genre == Catalog.POPULAR) Catalog.regions.firstOrNull { r -> r.id == it.regionId }?.name ?: it.genre else it.genre
+            if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · $tail"
+        }
         detailText.text = artistLine ?: "곡을 고르면 여기에서 이어집니다"
         drivePlace?.text = region?.name ?: "길 위의 음악"
         driveTitle?.text = current?.title ?: "재생 버튼을 누르면 이 길의 곡이 시작돼요"
