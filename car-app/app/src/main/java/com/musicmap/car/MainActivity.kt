@@ -62,6 +62,12 @@ class MainActivity : Activity() {
     private var restricted = false
     private var driveShown: Boolean? = null
     private val parkedControls = mutableListOf<View>()
+    // What the last render applied, so a once-a-second refresh touches only what changed.
+    private var renderedGenre: String? = null
+    private var renderedTab: Boolean? = null
+    private var renderedRestricted: Boolean? = null
+    /** Setting identical text still forces a layout pass, so skip it. */
+    private fun TextView.show(value: String) { if (text.toString() != value) text = value }
     private val update: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,7 +124,7 @@ class MainActivity : Activity() {
         tracks = kit.column()
         currentText = kit.oneLine(kit.text("", T.BODY_STRONG))
         detailText = kit.oneLine(kit.text("", T.CAPTION, Ui.TEXT_MUTED))
-        timeText = kit.text("", T.SMALL, Ui.TEXT_MUTED).apply { fontFeatureSettings = "tnum" }
+        timeText = kit.text("", T.SMALL, Ui.TEXT_MUTED).apply { fontFeatureSettings = "tnum"; gravity = Gravity.END }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 1000
             progressTintList = ColorStateList.valueOf(Ui.TEXT)
@@ -207,7 +213,8 @@ class MainActivity : Activity() {
         player.addView(line)
         val seek = kit.row()
         seek.addView(progress, kit.lp(0, kit.u(4f), 1f))
-        seek.addView(timeText, kit.lp(-2, -2) { leftMargin = kit.u(12f) })
+        // Fixed width: the clock changes every second and must not re-run layout for the whole screen.
+        seek.addView(timeText, kit.lp(kit.u(96f), -2) { leftMargin = kit.u(8f) })
         player.addView(seek, kit.lp(-1, -2) { topMargin = kit.u(12f) })
         root.addView(player, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(panelW + m * 2, 0, m, m) })
         bar = player
@@ -357,68 +364,78 @@ class MainActivity : Activity() {
             drive?.visibility = if (driving) View.VISIBLE else View.GONE
             if (wide) syncMapInsets()
         }
-        eyebrow.text = if (favoritesOnly) "보관함" else "지금 지나는 곳"
-        placeTitle.text = if (favoritesOnly) "저장한 음악" else region?.name ?: "어디로 갈까요"
+        eyebrow.show(if (favoritesOnly) "보관함" else "지금 지나는 곳")
+        placeTitle.show(if (favoritesOnly) "저장한 음악" else region?.name ?: "어디로 갈까요")
         explore?.visibility = if (favoritesOnly) View.GONE else View.VISIBLE
         if (wide) { sources.visibility = if (favoritesOnly) View.GONE else View.VISIBLE }
-        tabs.forEachIndexed { i, tab ->
-            val active = i < 2 && favoritesOnly == (i == 1)
-            tab.setTextColor(if (active) Ui.TEXT else Ui.TEXT_MUTED); tab.typeface = kit.weight(if (active) 600 else 400)
+        if (renderedTab != favoritesOnly) {
+            renderedTab = favoritesOnly
+            tabs.forEachIndexed { i, tab ->
+                val active = i < 2 && favoritesOnly == (i == 1)
+                tab.setTextColor(if (active) Ui.TEXT else Ui.TEXT_MUTED); tab.typeface = kit.weight(if (active) 600 else 400)
+            }
         }
         routeButton.visibility = if (state.demo) View.GONE else View.VISIBLE
         jump.visibility = if (state.demo) View.VISIBLE else View.GONE
         (voice.drawable as? IconDrawable)?.icon = if (state.voiceOn) Icon.VOICE else Icon.VOICE_OFF
         voice.contentDescription = if (state.voiceOn) "음성 안내 켜짐" else "음성 안내 꺼짐"
-        map.point = state.point; map.regionId = region?.id; map.invalidate()
-        genres.forEach { kit.tone(it, if (it.text.toString() == state.genre) Tone.SELECTED else Tone.QUIET) }
+        if (map.point != state.point || map.regionId != region?.id) { map.point = state.point; map.regionId = region?.id; map.invalidate() }
+        if (renderedGenre != state.genre) {
+            renderedGenre = state.genre
+            genres.forEach { kit.tone(it, if (it.text.toString() == state.genre) Tone.SELECTED else Tone.QUIET) }
+        }
 
         val list = if (favoritesOnly) Catalog.tracks.filter { it.id in state.favorites && (state.genre == "전체" || it.genre == state.genre) } else state.recommendations
-        contextText.text = when {
+        val contextLine = when {
             favoritesOnly -> if (list.isEmpty()) "" else "${list.size}곡"
             state.drive.line.isNotBlank() -> state.drive.line
             region != null -> "이곳에 어울리는 곡 ${list.size}곡"
             else -> "현재 위치를 켜거나 경로를 둘러보세요"
         }
+        contextText.show(contextLine)
         val waiting = state.point == null && !state.demo
-        sourceText.text = if (favoritesOnly || (waiting && state.source == "위치 수신 대기")) "" else state.source
+        sourceText.show(if (favoritesOnly || (waiting && state.source == "위치 수신 대기")) "" else state.source)
         sourceText.visibility = if (sourceText.text.isEmpty()) View.GONE else View.VISIBLE
 
         filterBar.visibility = if (favoritesOnly || region != null) View.VISIBLE else View.GONE
         val listKey = list.joinToString { it.id } + current?.id + state.playing + state.favorites.sorted().joinToString() + favoritesOnly + (state.point != null)
+        var listRebuilt = false
         if (listKey != renderedList) {
+            listRebuilt = true
             renderedList = listKey; tracks.removeAllViews()
             if (list.isEmpty() && (favoritesOnly || state.point != null)) tracks.addView(emptyState())
             list.forEach { tracks.addView(trackRow(it), kit.lp(-1, -2) { bottomMargin = kit.u(4f) }) }
         }
         caption?.let {
-            it.text = state.caption; it.visibility = if (state.caption.isEmpty()) View.GONE else View.VISIBLE
+            it.show(state.caption); it.visibility = if (state.caption.isEmpty()) View.GONE else View.VISIBLE
             (it.layoutParams as FrameLayout.LayoutParams).let { lp ->
                 val start = if (driving) kit.u(16f) else (panel?.layoutParams?.width ?: 0) + kit.u(32f)
                 if (lp.leftMargin != start) { lp.leftMargin = start; it.requestLayout() }
             }
         }
-        messageText.text = if (restricted && !wide) "주행 중에는 목록과 지도 조작을 쉬어요" else if (!wide && state.caption.isNotEmpty()) state.caption else state.message
+        messageText.show(if (restricted && !wide) "주행 중에는 목록과 지도 조작을 쉬어요" else if (!wide && state.caption.isNotEmpty()) state.caption else state.message)
         messageText.visibility = if (messageText.text.isEmpty()) View.GONE else View.VISIBLE
         fun enableControls(view: View) {
             view.isEnabled = !restricted
             if (view is ViewGroup) for (i in 0 until view.childCount) enableControls(view.getChildAt(i))
         }
-        parkedControls.forEach { enableControls(it); it.alpha = if (restricted) .4f else 1f }
-        for (i in 0 until tracks.childCount) tracks.getChildAt(i).isEnabled = !restricted
+        if (renderedRestricted != restricted) parkedControls.forEach { enableControls(it); it.alpha = if (restricted) .4f else 1f }
+        if (renderedRestricted != restricted || listRebuilt) for (i in 0 until tracks.childCount) tracks.getChildAt(i).isEnabled = !restricted
+        renderedRestricted = restricted
 
         if (nowArtFor != current?.id) {
             nowArtFor = current?.id; nowArt.removeAllViews()
             nowArt.addView(kit.art(current), FrameLayout.LayoutParams(-1, -1))
         }
-        currentText.text = current?.title ?: "재생 중인 곡이 없어요"
+        currentText.show(current?.title ?: "재생 중인 곡이 없어요")
         val artistLine = current?.let {
             val tail = if (it.genre == Catalog.POPULAR) Catalog.regions.firstOrNull { r -> r.id == it.regionId }?.name ?: it.genre else it.genre
             if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · $tail"
         }
-        detailText.text = artistLine ?: "곡을 고르면 여기에서 이어집니다"
-        drivePlace?.text = region?.name ?: "길 위의 음악"
-        driveTitle?.text = current?.title ?: "재생 버튼을 누르면 이 길의 곡이 시작돼요"
-        driveDetail?.text = listOfNotNull(artistLine, state.drive.line.takeIf { it.isNotBlank() }).joinToString("  ·  ")
+        detailText.show(artistLine ?: "곡을 고르면 여기에서 이어집니다")
+        drivePlace?.show(region?.name ?: "길 위의 음악")
+        driveTitle?.show(current?.title ?: "재생 버튼을 누르면 이 길의 곡이 시작돼요")
+        driveDetail?.show(listOfNotNull(artistLine, state.drive.line.takeIf { it.isNotBlank() }).joinToString("  ·  "))
         driveDetail?.visibility = if (driveDetail?.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         playButtons.forEach {
             (it.drawable as? IconDrawable)?.icon = if (state.playing || state.buffering) Icon.PAUSE else Icon.PLAY
@@ -436,6 +453,6 @@ class MainActivity : Activity() {
         favorite.alpha = if (favorite.isEnabled) 1f else .4f
         progress.progress = (1000L * state.positionMs / state.durationMs.coerceAtLeast(1)).toInt()
         fun clock(ms: Int) = "%d:%02d".format(ms / 60000, ms / 1000 % 60)
-        timeText.text = if (current == null) "" else "${clock(state.positionMs)} / ${clock(state.durationMs)}"
+        timeText.show(if (current == null) "" else "${clock(state.positionMs)} / ${clock(state.durationMs)}")
     }
 }

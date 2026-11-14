@@ -23,7 +23,8 @@ class MusicMapView(context: Context) : View(context) {
     var insetLeft = 0
     var insetBottom = 0
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tiles = object : android.util.LruCache<String, Bitmap>(64) {}
+    // A 2560x1440 car display shows about 80 tiles at once; a smaller cache evicts visible tiles and reloads them forever.
+    private val tiles = object : android.util.LruCache<String, Bitmap>(192) {}
     private val pending = mutableSetOf<String>()
     private val failed = mutableMapOf<String, Long>()
     private val workers = Executors.newFixedThreadPool(2)
@@ -38,6 +39,8 @@ class MusicMapView(context: Context) : View(context) {
         -.115f, -.225f, -.044f, 0f, 124f,
         0f, 0f, 0f, 1f, 0f))
     private val route = Path()
+    private var laneDash: DashPathEffect? = null
+    private var laneDashFor = 0f
 
     init {
         contentDescription = "현재 위치와 지역별 음악을 보여주는 지도"
@@ -84,7 +87,8 @@ class MusicMapView(context: Context) : View(context) {
         paint.style = Paint.Style.STROKE; paint.strokeCap = Paint.Cap.BUTT
         paint.color = Ui.BASE; paint.strokeWidth = 7 * d; canvas.drawPath(route, paint)
         paint.color = Ui.ACCENT; paint.strokeWidth = 3 * d
-        paint.pathEffect = DashPathEffect(floatArrayOf(12 * d, 8 * d), 0f); canvas.drawPath(route, paint)
+        if (laneDash == null || laneDashFor != d) { laneDash = DashPathEffect(floatArrayOf(12 * d, 8 * d), 0f); laneDashFor = d }
+        paint.pathEffect = laneDash; canvas.drawPath(route, paint)
         paint.pathEffect = null; paint.style = Paint.Style.FILL
         Catalog.regions.forEach { region ->
             val p = screen(region.point)
