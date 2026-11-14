@@ -9,8 +9,9 @@ class MusicMapApplication : Application() {
     val appleMusic by lazy { AppleMusicRepository(this) }
     override fun onCreate() {
         super.onCreate()
-        state.favorites = getSharedPreferences("music-map", MODE_PRIVATE)
-            .getStringSet("favorites", emptySet())!!.toSet()
+        val preferences = getSharedPreferences("music-map", MODE_PRIVATE)
+        state.favorites = preferences.getStringSet("favorites", emptySet())!!.toSet()
+        state.voiceOn = preferences.getBoolean("voice", true)
     }
 }
 
@@ -28,7 +29,12 @@ class AppState {
     var demo = false
     var demoProgress = 0.0
     var source = "위치 수신 대기"
-    var message = "지역별 창작 시연곡 · 실제 음악 서비스 미연결"
+    var message = ""
+    /** Mood reported by the car (or by the guided demo route). */
+    var drive = DriveContext()
+    var voiceOn = true
+    /** The line currently being announced, shown as a caption so it also works with sound off. */
+    var caption = ""
     var favorites = setOf<String>()
     val listeners = linkedSetOf<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())

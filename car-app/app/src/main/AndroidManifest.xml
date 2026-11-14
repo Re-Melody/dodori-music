@@ -20,7 +20,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Distraction optimization is intentionally not claimed before vehicle UX validation. -->
+            <!-- While driving the activity switches to its drive view: large type, three playback controls, no lists or text entry. -->
+            <meta-data android:name="distractionOptimized" android:value="true" />
         </activity>
         <service android:name=".PlaybackService" android:exported="true"
             android:foregroundServiceType="mediaPlayback|location">

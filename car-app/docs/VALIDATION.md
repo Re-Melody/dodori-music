@@ -1,5 +1,24 @@
 # 검증 기록
 
+## 2026-11-14 화면 개편 · 차량 신호 · 음성 안내 (KST)
+
+확인한 것 (macOS, JDK 25, Android SDK 34):
+
+- `assembleStandardDebug`, `assemblePleosDebug`, `assemblePleosRelease` 성공. release APK 서명 확인(`apksigner verify`).
+- `testStandardDebugUnitTest` 7개 통과(주행 분위기에 따른 추천 순서 검사 1개 추가).
+- `lintStandardDebug`, `lintPleosDebug` 오류 0개.
+- 일반 Android 14 에뮬레이터(1920×1080, 160dpi, 가로)에서 `standard` 변형으로 직접 실행:
+  경로 둘러보기 → 재생 → 다음 지역, 지역 진입 자막, 비 오는 구간의 추천 순서 변경, 보관함, Apple Music 화면, 주행 화면(디버그 전용 `--ez drive true`), 세로 화면(1080×1920, 420dpi). 충돌 기록 없음.
+
+- Apple Music: 개발자 토큰으로 카탈로그 검색(25곡), 앨범 커버 표시, 30초 미리듣기 재생(재생 상태 PLAYING, 0:30 길이) 확인. 로그인·전체 곡 재생은 미검증.
+
+아직 확인하지 못한 것:
+
+- **Pleos Connect 에뮬레이터에서의 실행.** Vehicle SDK(와이퍼·드라이브 모드)와 TextToSpeech SDK 호출은 공식 라이브러리에 맞춰 컴파일만 확인했습니다. 실제 값 수신, 권한 팝업, 음성 출력은 Pleos 에뮬레이터에서 확인해야 합니다.
+- 음성 출력 자체. 사용한 일반 에뮬레이터 이미지에는 음성 엔진이 없어 자막 표시와 음량 낮춤 경로만 확인했습니다.
+- 기존 계측 테스트(`SmokeInstrumentation`, `VehicleQa`)는 이번 변경 뒤 다시 실행하지 않았습니다.
+- 시작 직후 에뮬레이터에서 프레임 끊김이 관찰됐습니다. 앱 메인 스레드는 대기 상태였고 소프트웨어 GPU와 호스트 부하의 영향으로 보이나, 실기기에서 재확인이 필요합니다.
+
 ## 2026-11-10 다크 디자인·차량 가로 화면 (KST)
 
 - 프로젝트 `Design,md`의 규칙(다크 무채색 표면, 단일 기능 액센트, 필·원형 버튼, 8 단위 간격, 700/400 굵기)으로 화면을 재구성했다.

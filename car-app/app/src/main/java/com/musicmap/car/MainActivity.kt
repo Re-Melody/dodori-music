@@ -5,58 +5,62 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
-import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
-import kotlin.math.roundToInt
 
 /**
- * Two layouts from one set of views:
- * - wide (Pleos vehicle display, landscape): side rail + map panel + list panel + full-width now-playing bar
- * - compact (portrait phone): stacked scroll + mini player + bottom navigation
+ * One idea per screen: the place you are driving through, and the music that belongs to it.
+ * - wide (Pleos vehicle display): the map fills the screen; a place panel and a now-playing bar float on it.
+ *   While the vehicle requires distraction optimization the panels give way to a large drive view.
+ * - compact (portrait phone): place header, map card, list, mini player, tabs.
  */
 class MainActivity : Activity() {
     private val state get() = (application as MusicMapApplication).state
     private var wide = false
-    /** Car-display scale: the design's type/spacing ratios are kept, the whole scale grows with the screen. */
-    private var s = 1f
+    private lateinit var kit: UiKit
     private lateinit var map: MusicMapView
-    private lateinit var regionText: TextView
+    private lateinit var eyebrow: TextView
+    private lateinit var placeTitle: TextView
+    private lateinit var contextText: TextView
     private lateinit var sourceText: TextView
     private lateinit var messageText: TextView
     private lateinit var currentText: TextView
     private lateinit var detailText: TextView
     private lateinit var timeText: TextView
-    private lateinit var playButton: ImageButton
-    private lateinit var favorite: Button
     private lateinit var tracks: LinearLayout
     private lateinit var progress: ProgressBar
+    private lateinit var routeButton: Button
     private lateinit var jump: Button
+    private lateinit var favorite: Button
+    private lateinit var voice: ImageButton
     private lateinit var genres: List<Button>
-    private lateinit var explore: LinearLayout
-    private lateinit var pageTitle: TextView
-    private lateinit var pageSubtitle: TextView
-    private lateinit var listTitle: TextView
+    private lateinit var tabs: List<Button>
     private lateinit var listScroll: ScrollView
     private lateinit var nowArt: FrameLayout
-    private lateinit var navButtons: List<Button>
+    private lateinit var sources: LinearLayout
+    private lateinit var filterBar: View
+    private val playButtons = mutableListOf<ImageButton>()
+    private var panel: View? = null
+    private var bar: View? = null
+    private var zoom: View? = null
+    private var drive: View? = null
+    private var drivePlace: TextView? = null
+    private var driveTitle: TextView? = null
+    private var driveDetail: TextView? = null
+    private var explore: View? = null
+    private var caption: TextView? = null
     private var nowArtFor: String? = "unset"
     private var playerDialog: android.app.AlertDialog? = null
     private var dialogTitle: TextView? = null
-    private var dialogPlay: ImageButton? = null
     private var renderedList = ""
     private var favoritesOnly = false
     private var uxGuard: CarUxGuard? = null
     private var restricted = false
+    private var driveShown: Boolean? = null
     private val parkedControls = mutableListOf<View>()
     private val update: () -> Unit = { render() }
 
@@ -65,89 +69,26 @@ class MainActivity : Activity() {
         favoritesOnly = savedInstanceState?.getBoolean("favoritesOnly") ?: false
         val config = resources.configuration
         wide = config.screenWidthDp >= 840 && config.screenWidthDp > config.screenHeightDp
-        s = (minOf(config.screenWidthDp, config.screenHeightDp) / 600f).coerceIn(1f, 1.5f)
+        // Car displays are read at arm's length: the whole scale grows with the short side.
+        kit = UiKit(this, (minOf(config.screenWidthDp, config.screenHeightDp) / 600f).coerceIn(1f, 1.5f))
         window.statusBarColor = Ui.BASE; window.navigationBarColor = Ui.BASE
         window.decorView.systemUiVisibility = 0
         buildUi()
-        if (packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)) {
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("drive", false)) {
+            restricted = true // Debug builds only: preview the drive view without a moving vehicle.
+        } else if (packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)) {
             uxGuard = CarUxGuard(this) { value -> runOnUiThread { restricted = value; render() } }
         }
-        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 20)
+        val wanted = buildList {
+            if (android.os.Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            addAll(drivePermissions())
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 20)
     }
     override fun onStart() { super.onStart(); state.listeners.add(update); render() }
     override fun onStop() { state.listeners.remove(update); super.onStop() }
     override fun onDestroy() { playerDialog?.dismiss(); uxGuard?.close(); map.close(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) { outState.putBoolean("favoritesOnly", favoritesOnly); super.onSaveInstanceState(outState) }
-
-    // ---- Design primitives ------------------------------------------------------------------
-    private fun dp(value: Float) = (value * resources.displayMetrics.density).roundToInt()
-    /** Spacing on the 8-unit grid, scaled for the display. */
-    private fun u(value: Float) = dp(value * s)
-    private fun shape(color: Int, radius: Float, stroke: Int? = null, oval: Boolean = false) = GradientDrawable().apply {
-        setColor(color)
-        if (oval) this.shape = GradientDrawable.OVAL else cornerRadius = u(radius).toFloat()
-        if (stroke != null) setStroke(dp(1f), stroke)
-    }
-    private fun surface(color: Int, radius: Float, stroke: Int? = null, oval: Boolean = false): Drawable =
-        RippleDrawable(ColorStateList.valueOf(Ui.RIPPLE), shape(color, radius, stroke, oval), shape(Color.WHITE, radius, oval = oval))
-    private fun weight(w: Int): Typeface = Typeface.create(Typeface.DEFAULT, w, false)
-    private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-    private fun lp(w: Int, h: Int, weight: Float = 0f, block: LinearLayout.LayoutParams.() -> Unit = {}) =
-        LinearLayout.LayoutParams(w, h, weight).apply(block)
-
-    /** Type roles from the design hierarchy (size in sp before display scale, weight). */
-    private enum class T(val size: Float, val weight: Int) {
-        TITLE(24f, 700), HEADING(18f, 600), BODY_BOLD(16f, 700), BODY(16f, 400),
-        CAPTION_BOLD(14f, 700), CAPTION(14f, 400), SMALL_BOLD(12f, 700), SMALL(12f, 400)
-    }
-    private fun text(value: String, role: T, color: Int = Ui.TEXT) = TextView(this).apply {
-        text = value; textSize = role.size * s; typeface = weight(role.weight); setTextColor(color)
-    }
-    private enum class Pill { DARK, OUTLINED, ACCENT }
-    private fun pill(label: String, style: Pill, icon: Icon? = null, iconEnd: Boolean = false, action: () -> Unit) = Button(this).apply {
-        text = label; isAllCaps = true; letterSpacing = 0.1f; textSize = 14f * s; typeface = weight(700)
-        minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
-        stateListAnimator = null; elevation = 0f; gravity = Gravity.CENTER
-        setPadding(u(20f), 0, u(20f), 0)
-        if (icon != null) {
-            val d = IconDrawable(icon, Ui.TEXT).apply { setBounds(0, 0, u(18f), u(18f)) }
-            if (iconEnd) setCompoundDrawables(null, null, d, null) else setCompoundDrawables(d, null, null, null)
-            compoundDrawablePadding = u(8f)
-        }
-        stylePill(this, style)
-        setOnClickListener { action() }
-    }
-    private fun stylePill(button: Button, style: Pill) {
-        val (bg, fg) = when (style) {
-            Pill.DARK -> Ui.RAISED to Ui.TEXT
-            Pill.OUTLINED -> Color.TRANSPARENT to Ui.TEXT
-            Pill.ACCENT -> Ui.ACCENT to Ui.ON_ACCENT
-        }
-        button.background = surface(bg, 9999f, if (style == Pill.OUTLINED) Ui.BORDER_LIGHT else null)
-        button.setTextColor(fg)
-        button.compoundDrawables.filterIsInstance<IconDrawable>().forEach { it.color = fg }
-    }
-    private fun circle(icon: Icon, size: Float, bg: Int, fg: Int, description: String, iconRatio: Float = .45f, action: () -> Unit) = ImageButton(this).apply {
-        setImageDrawable(IconDrawable(icon, fg)); contentDescription = description
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        background = surface(bg, 0f, oval = true)
-        val pad = u(size * (1 - iconRatio) / 2); setPadding(pad, pad, pad, pad)
-        setOnClickListener { action() }
-    }
-    private fun albumArt(index: Int, radius: Float = 4f): View = object : View(this) {
-        private val note = IconDrawable(Icon.NOTE, 0xB3FFFFFF.toInt())
-        init {
-            val tones = Ui.artTones[((index % Ui.artTones.size) + Ui.artTones.size) % Ui.artTones.size]
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, tones).apply { cornerRadius = u(radius).toFloat() }
-            clipToOutline = true; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-        override fun onDraw(canvas: Canvas) {
-            val n = (minOf(width, height) * .42f).toInt()
-            note.setBounds((width - n) / 2, (height - n) / 2, (width + n) / 2, (height + n) / 2); note.draw(canvas)
-        }
-    }
 
     // ---- Commands ---------------------------------------------------------------------------
     private fun command(action: String, key: String? = null, value: String? = null) {
@@ -156,206 +97,224 @@ class MainActivity : Activity() {
         startForegroundService(intent)
     }
     private fun liveLocation() {
-        if (!hasPositionPermission(this))
-            requestPermissions(positionPermissions(), 10)
+        if (!hasPositionPermission(this)) requestPermissions(positionPermissions(), 10)
         else command("live")
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 10) {
             if (hasPositionPermission(this)) command("live")
-            else Toast.makeText(this, "위치 권한 없이도 시연 경로를 사용할 수 있어요", Toast.LENGTH_LONG).show()
+            else Toast.makeText(this, "위치 권한 없이도 경로 둘러보기는 쓸 수 있어요", Toast.LENGTH_LONG).show()
         }
     }
 
     // ---- Shared building blocks -------------------------------------------------------------
     private fun buildUi() {
-        val root = column().apply { setBackgroundColor(Ui.BASE) }
-        setContentView(root)
-        pageTitle = text("어디로 떠나볼까요?", T.TITLE)
-        pageSubtitle = text("지금 있는 곳에서, 새로운 음악을 만나세요.", T.CAPTION, Ui.TEXT_MUTED).apply { setPadding(0, u(4f), 0, 0) }
-        sourceText = text("", T.SMALL, Ui.TEXT_MUTED).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-        listTitle = text("이곳의 사운드", T.TITLE)
-        jump = pill("다음 지역", Pill.OUTLINED, Icon.ARROW, iconEnd = true) { command("jump") }.also { parkedControls.add(it) }
-        tracks = column()
-        messageText = text("", T.SMALL, Ui.TEXT_MUTED).apply { setPadding(u(4f), u(12f), 0, u(8f)) }
-        currentText = text("오늘의 첫 곡을 찾아보세요", T.BODY_BOLD).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        detailText = text("음악을 선택하면 여기에 표시돼요", T.CAPTION, Ui.TEXT_MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setPadding(0, u(2f), 0, 0) }
-        timeText = text("", T.SMALL, Ui.TEXT_MUTED)
+        eyebrow = kit.text("지금 지나는 곳", T.CAPTION, Ui.TEXT_MUTED)
+        placeTitle = kit.text("", if (wide) T.DISPLAY else T.TITLE).apply { maxLines = 2 }
+        contextText = kit.oneLine(kit.text("", T.CAPTION, Ui.TEXT_SOFT))
+        sourceText = kit.oneLine(kit.text("", T.SMALL, Ui.TEXT_MUTED))
+        messageText = kit.text("", T.SMALL, Ui.TEXT_MUTED)
+        tracks = kit.column()
+        currentText = kit.oneLine(kit.text("", T.BODY_STRONG))
+        detailText = kit.oneLine(kit.text("", T.CAPTION, Ui.TEXT_MUTED))
+        timeText = kit.text("", T.SMALL, Ui.TEXT_MUTED).apply { fontFeatureSettings = "tnum" }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 1000
             progressTintList = ColorStateList.valueOf(Ui.TEXT)
-            progressBackgroundTintList = ColorStateList.valueOf(Ui.BORDER)
+            progressBackgroundTintList = ColorStateList.valueOf(Ui.TRACK)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        favorite = pill("저장", Pill.OUTLINED, Icon.HEART) { state.current?.let { command("favorite", "id", it.id) } }
+        favorite = kit.button("저장", Tone.OUTLINE, Icon.HEART) { state.current?.let { command("favorite", "id", it.id) } }
+        voice = kit.circle(Icon.VOICE, 40f, Color.TRANSPARENT, Ui.TEXT_SOFT, "음성 안내", .5f) { command("voice") }
         nowArt = FrameLayout(this)
-        if (wide) buildWide(root) else buildCompact(root)
+        routeButton = kit.button("경로 둘러보기", Tone.QUIET, Icon.ROUTE) { command("demo") }.apply { contentDescription = "시연 시작" }
+        jump = kit.button("다음 지역", Tone.QUIET, Icon.ARROW, iconEnd = true) { command("jump") }
+        if (wide) buildWide() else buildCompact()
     }
-    private fun buildMapCard(): FrameLayout {
-        val wrap = FrameLayout(this).apply { background = shape(Ui.RAISED, 8f); clipToOutline = true }
-        map = MusicMapView(this).apply { scale = s }
-        wrap.addView(map, FrameLayout.LayoutParams(-1, -1))
-        val badge = column().apply {
-            background = shape(Ui.SURFACE, 8f); setPadding(u(16f), u(10f), u(16f), u(12f)); elevation = u(12f).toFloat()
+    private fun buildTabs(): LinearLayout {
+        val row = kit.row()
+        tabs = listOf("탐색", "보관함", "Apple Music").mapIndexed { index, label ->
+            kit.tab(label) {
+                if (index == 2) startActivity(Intent(this, AppleMusicActivity::class.java))
+                else { favoritesOnly = index == 1; renderedList = ""; render(); listScroll.smoothScrollTo(0, 0) }
+            }.also { parkedControls.add(it) }
         }
-        badge.addView(text("지금 듣기 좋은 곳", T.SMALL_BOLD, Ui.TEXT_MUTED))
-        regionText = text("나의 음악 지도", T.HEADING).apply { typeface = weight(700); setPadding(0, u(2f), 0, 0) }
-        badge.addView(regionText)
-        wrap.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(u(12f), u(12f), 0, 0) })
-        val zoom = column(); parkedControls.add(zoom)
-        val size = 48f
-        zoom.addView(circle(Icon.PLUS, size, Ui.SURFACE, Ui.TEXT, "지도 확대", .42f) { map.zoom = (map.zoom + 1).coerceAtMost(14); map.invalidate() }.apply { elevation = u(8f).toFloat() }, lp(u(size), u(size)))
-        zoom.addView(circle(Icon.MINUS, size, Ui.SURFACE, Ui.TEXT, "지도 축소", .42f) { map.zoom = (map.zoom - 1).coerceAtLeast(7); map.invalidate() }.apply { elevation = u(8f).toFloat() }, lp(u(size), u(size)) { topMargin = u(8f) })
-        wrap.addView(zoom, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(12f), u(12f), 0) })
-        return wrap
+        return row
     }
     private fun buildSources(): LinearLayout {
-        val sources = row(); parkedControls.add(sources)
-        sources.addView(pill("현재 위치", Pill.DARK, Icon.LOCATE) { liveLocation() }, lp(-2, u(48f)))
-        sources.addView(pill("경로 둘러보기", Pill.DARK, Icon.ROUTE) { command("demo") }.apply { contentDescription = "시연 시작" }, lp(-2, u(48f)) { leftMargin = u(8f) })
+        sources = kit.row(); parkedControls.add(sources)
+        sources.addView(kit.button("현재 위치", Tone.QUIET, Icon.LOCATE) { liveLocation() }, kit.lp(0, kit.u(48f), 1f))
+        sources.addView(routeButton, kit.lp(0, kit.u(48f), 1f) { leftMargin = kit.u(8f) })
+        sources.addView(jump, kit.lp(0, kit.u(48f), 1f) { leftMargin = kit.u(8f) })
         return sources
     }
-    private fun buildListHeader() = row().apply {
-        addView(listTitle, lp(0, -2, 1f))
-        addView(jump, lp(-2, u(40f)))
-    }
     private fun buildFilters(): View {
-        val filters = row(); parkedControls.add(filters)
-        genres = listOf("전체", "차분하게", "경쾌하게").map { genre ->
-            pill(genre, Pill.DARK) { command("genre", "value", genre) }.apply { letterSpacing = 0f; typeface = weight(400) }
-                .also { filters.addView(it, lp(-2, u(44f)) { rightMargin = u(8f) }) }
+        val filters = kit.row(); parkedControls.add(filters)
+        genres = listOf("전체", Catalog.CALM, Catalog.LIVELY).map { genre ->
+            kit.button(genre, Tone.QUIET) { command("genre", "value", genre) }
+                .also { filters.addView(it, kit.lp(-2, kit.u(40f)) { rightMargin = kit.u(8f) }) }
         }
-        return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(filters) }
+        filterBar = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(filters) }
+        return filterBar
     }
-    private fun songInfo(openPlayer: Boolean) = column().apply {
-        addView(currentText); addView(detailText)
-        if (openPlayer) {
-            isFocusable = true; contentDescription = "재생 화면 열기"; setOnClickListener { showPlayer() }
-        }
-    }
-    private fun navItems() = listOf("탐색" to Icon.EXPLORE, "보관함" to Icon.LIBRARY, "Apple Music" to Icon.NOTE).mapIndexed { index, (label, icon) ->
-        Button(this).apply {
-            text = label; isAllCaps = false; textSize = 12f * s
-            minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
-            stateListAnimator = null; elevation = 0f; gravity = Gravity.CENTER; setPadding(0, u(8f), 0, u(8f))
-            setCompoundDrawables(null, IconDrawable(icon, Ui.TEXT_MUTED).apply { setBounds(0, 0, u(26f), u(26f)) }, null, null)
-            compoundDrawablePadding = u(6f)
-            setOnClickListener {
-                if (index == 2) startActivity(Intent(this@MainActivity, AppleMusicActivity::class.java))
-                else { favoritesOnly = index == 1; renderedList = ""; render(); listScroll.smoothScrollTo(0, 0) }
-            }
-            parkedControls.add(this)
-        }
-    }
+    private fun playButton(size: Float) = kit.circle(Icon.PLAY, size, Ui.ACCENT, Ui.ON_ACCENT, "재생") { command("play") }.also { playButtons.add(it) }
+    private fun skipButton(icon: Icon, size: Float, label: String, action: String) =
+        kit.circle(icon, size, Color.TRANSPARENT, Ui.TEXT_SOFT, label) { command(action) }
+    private fun <V : View> floating(view: V, radius: Float = 16f): V = view.apply { background = kit.shape(0xF216191B.toInt(), radius, Ui.HAIRLINE) }
 
     // ---- Wide: vehicle display --------------------------------------------------------------
-    private fun buildWide(root: LinearLayout) {
-        val gap = u(8f)
-        val main = row().apply { gravity = Gravity.NO_GRAVITY; setPadding(gap, gap, gap, 0) }
-        root.addView(main, lp(-1, 0, 1f))
+    private fun buildWide() {
+        val root = FrameLayout(this).apply { setBackgroundColor(Ui.BASE) }
+        setContentView(root)
+        val m = kit.u(16f)
+        val screenW = kit.dp(resources.configuration.screenWidthDp.toFloat())
+        val panelW = minOf(kit.u(460f), (screenW * .36f).toInt())
+        map = MusicMapView(this).apply { scale = kit.s; insetLeft = panelW + m }
+        root.addView(map, FrameLayout.LayoutParams(-1, -1))
 
-        val rail = column().apply { background = shape(Ui.SURFACE, 8f); setPadding(gap, u(12f), gap, u(12f)) }
-        main.addView(rail, lp(u(104f), -1))
-        navButtons = navItems().onEach { rail.addView(it, lp(-1, u(88f)) { bottomMargin = gap }) }
-
-        explore = column().apply { background = shape(Ui.SURFACE, 8f); setPadding(u(20f), u(20f), u(20f), u(16f)) }
-        main.addView(explore, lp(0, -1, 1.2f) { leftMargin = gap })
-        explore.addView(pageTitle); explore.addView(pageSubtitle)
-        explore.addView(buildMapCard(), lp(-1, 0, 1f) { topMargin = u(16f) })
-        val sources = buildSources()
-        sources.addView(sourceText, lp(0, -2, 1f) { leftMargin = u(16f) })
-        explore.addView(sources, lp(-1, -2) { topMargin = u(12f) })
-
-        val listPanel = column().apply { background = shape(Ui.SURFACE, 8f); setPadding(u(20f), u(20f), u(12f), 0) }
-        main.addView(listPanel, lp(0, -1, 1f) { leftMargin = gap })
-        listPanel.addView(buildListHeader(), lp(-1, -2) { rightMargin = u(8f) })
-        listPanel.addView(buildFilters(), lp(-1, -2) { topMargin = u(12f) })
+        val place = floating(kit.column()).apply { setPadding(kit.u(24f), kit.u(16f), kit.u(24f), kit.u(16f)); clipToPadding = false }
+        val top = buildTabs()
+        tabs.forEachIndexed { i, tab -> top.addView(tab, kit.lp(-2, kit.u(40f)) { if (i > 0) leftMargin = kit.u(4f) }) }
+        top.addView(View(this), kit.lp(0, 1, 1f))
+        top.addView(voice, kit.lp(kit.u(40f), kit.u(40f)))
+        place.addView(top, kit.lp(-1, -2) { leftMargin = -kit.u(12f); rightMargin = -kit.u(8f) })
+        place.addView(eyebrow, kit.lp(-1, -2) { topMargin = kit.u(24f) })
+        place.addView(placeTitle, kit.lp(-1, -2) { topMargin = kit.u(8f) })
+        place.addView(contextText, kit.lp(-1, -2) { topMargin = kit.u(8f) })
+        place.addView(kit.laneRule(), kit.lp(kit.u(72f), kit.u(4f)) { topMargin = kit.u(20f) })
+        place.addView(buildFilters(), kit.lp(-1, -2) { topMargin = kit.u(20f) })
         listScroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
-        val listBody = column(); listScroll.addView(listBody)
-        listBody.addView(tracks); listBody.addView(messageText)
-        listPanel.addView(listScroll, lp(-1, 0, 1f) { topMargin = u(12f) })
+        val listBody = kit.column(); listScroll.addView(listBody)
+        listBody.addView(tracks); listBody.addView(messageText, kit.lp(-1, -2) { topMargin = kit.u(12f); leftMargin = kit.u(8f) })
+        place.addView(listScroll, kit.lp(-1, 0, 1f) { topMargin = kit.u(12f); leftMargin = -kit.u(8f); rightMargin = -kit.u(8f) })
+        place.addView(sourceText, kit.lp(-1, -2) { topMargin = kit.u(8f) })
+        place.addView(buildSources(), kit.lp(-1, -2) { topMargin = kit.u(8f) })
+        root.addView(place, FrameLayout.LayoutParams(panelW, -1).apply { setMargins(m, m, 0, m) })
+        panel = place
 
-        root.addView(buildWideBar(), lp(-1, -2))
+        val player = floating(kit.column()).apply { setPadding(kit.u(16f), kit.u(16f), kit.u(16f), kit.u(12f)) }
+        val line = kit.row()
+        line.addView(nowArt, kit.lp(kit.u(56f), kit.u(56f)) { rightMargin = kit.u(16f) })
+        val info = kit.column().apply { addView(currentText); addView(detailText, kit.lp(-1, -2) { topMargin = kit.u(4f) }) }
+        line.addView(info, kit.lp(0, -2, 1f))
+        line.addView(skipButton(Icon.PREV, 48f, "이전 곡", "previous"), kit.lp(kit.u(48f), kit.u(48f)) { leftMargin = kit.u(16f) })
+        line.addView(playButton(64f), kit.lp(kit.u(64f), kit.u(64f)) { leftMargin = kit.u(16f); rightMargin = kit.u(16f) })
+        line.addView(skipButton(Icon.NEXT, 48f, "다음 곡", "next"), kit.lp(kit.u(48f), kit.u(48f)))
+        val side = kit.row().apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END }
+        side.addView(favorite, kit.lp(-2, kit.u(48f)))
+        line.addView(side, kit.lp(0, -2, 1f))
+        player.addView(line)
+        val seek = kit.row()
+        seek.addView(progress, kit.lp(0, kit.u(4f), 1f))
+        seek.addView(timeText, kit.lp(-2, -2) { leftMargin = kit.u(12f) })
+        player.addView(seek, kit.lp(-1, -2) { topMargin = kit.u(12f) })
+        root.addView(player, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(panelW + m * 2, 0, m, m) })
+        bar = player
+
+        val zoomColumn = kit.column(); parkedControls.add(zoomColumn)
+        zoomColumn.addView(kit.circle(Icon.PLUS, 48f, Ui.SURFACE, Ui.TEXT_SOFT, "지도 확대") { map.zoom = (map.zoom + 1).coerceAtMost(14); map.invalidate() }
+            .apply { background = kit.surface(Ui.SURFACE, 0f, Ui.HAIRLINE, oval = true) }, kit.lp(kit.u(48f), kit.u(48f)))
+        zoomColumn.addView(kit.circle(Icon.MINUS, 48f, Ui.SURFACE, Ui.TEXT_SOFT, "지도 축소") { map.zoom = (map.zoom - 1).coerceAtLeast(7); map.invalidate() }
+            .apply { background = kit.surface(Ui.SURFACE, 0f, Ui.HAIRLINE, oval = true) }, kit.lp(kit.u(48f), kit.u(48f)) { topMargin = kit.u(8f) })
+        root.addView(zoomColumn, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, m, m, 0) })
+        zoom = zoomColumn
+
+        caption = floating(kit.text("", T.BODY, Ui.TEXT), 12f).apply {
+            setPadding(kit.u(20f), kit.u(14f), kit.u(20f), kit.u(14f)); visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        root.addView(caption, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(panelW + m * 2, m, kit.u(80f), 0) })
+        root.addView(buildDrive(), FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(m, 0, m, m) })
+        player.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncMapInsets() }
+        drive?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncMapInsets() }
     }
-    private fun buildWideBar(): View {
-        val bar = row().apply { setPadding(u(16f), u(12f), u(16f), u(12f)) }
-        val left = row()
-        left.addView(nowArt, lp(u(64f), u(64f)) { rightMargin = u(14f) })
-        left.addView(songInfo(openPlayer = false), lp(0, -2, 1f))
-        bar.addView(left, lp(0, -2, 1f))
-
-        val center = column().apply { gravity = Gravity.CENTER_HORIZONTAL }
-        val controls = row().apply { gravity = Gravity.CENTER }
-        controls.addView(circle(Icon.PREV, 56f, Color.TRANSPARENT, Ui.TEXT_SOFT, "이전 곡", .42f) { command("previous") }, lp(u(56f), u(56f)))
-        playButton = circle(Icon.PLAY, 64f, Ui.ACCENT, Ui.ON_ACCENT, "재생", .42f) { command("play") }
-        controls.addView(playButton, lp(u(64f), u(64f)) { leftMargin = u(20f); rightMargin = u(20f) })
-        controls.addView(circle(Icon.NEXT, 56f, Color.TRANSPARENT, Ui.TEXT_SOFT, "다음 곡", .42f) { command("next") }, lp(u(56f), u(56f)))
-        center.addView(controls)
-        val track = row()
-        track.addView(progress, lp(0, u(4f), 1f))
-        track.addView(timeText, lp(-2, -2) { leftMargin = u(12f) })
-        center.addView(track, lp(-1, -2) { topMargin = u(8f) })
-        bar.addView(center, lp(0, -2, 1.3f) { leftMargin = u(16f); rightMargin = u(16f) })
-
-        val right = row().apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END }
-        right.addView(favorite, lp(-2, u(48f)))
-        right.addView(circle(Icon.STOP, 48f, Ui.RAISED, Ui.TEXT, "재생 종료", .4f) { command("stop") }, lp(u(48f), u(48f)) { leftMargin = u(12f) })
-        bar.addView(right, lp(0, -2, 1f))
-        return bar
+    /** Shown instead of the panels while the vehicle is moving: large type, three controls, nothing to browse. */
+    private fun buildDrive(): View {
+        val view = floating(kit.row(), 20f).apply { setPadding(kit.u(32f), kit.u(28f), kit.u(32f), kit.u(28f)); visibility = View.GONE }
+        val words = kit.column()
+        words.addView(kit.text("지금 지나는 곳", T.BODY, Ui.TEXT_MUTED))
+        drivePlace = kit.oneLine(kit.text("", T.HERO)).also { words.addView(it, kit.lp(-1, -2) { topMargin = kit.u(8f) }) }
+        words.addView(kit.laneRule(), kit.lp(kit.u(96f), kit.u(4f)) { topMargin = kit.u(20f) })
+        driveTitle = kit.oneLine(kit.text("", T.TITLE)).also { words.addView(it, kit.lp(-1, -2) { topMargin = kit.u(20f) }) }
+        driveDetail = kit.oneLine(kit.text("", T.BODY, Ui.TEXT_SOFT)).also { words.addView(it, kit.lp(-1, -2) { topMargin = kit.u(8f) }) }
+        view.addView(words, kit.lp(0, -2, 1f))
+        view.addView(skipButton(Icon.PREV, 80f, "이전 곡", "previous").apply { background = kit.surface(Ui.RAISED, 0f, oval = true) }, kit.lp(kit.u(80f), kit.u(80f)) { leftMargin = kit.u(24f) })
+        view.addView(playButton(112f), kit.lp(kit.u(112f), kit.u(112f)) { leftMargin = kit.u(24f); rightMargin = kit.u(24f) })
+        view.addView(skipButton(Icon.NEXT, 80f, "다음 곡", "next").apply { background = kit.surface(Ui.RAISED, 0f, oval = true) }, kit.lp(kit.u(80f), kit.u(80f)))
+        drive = view
+        return view
+    }
+    private fun syncMapInsets() {
+        val m = kit.u(16f)
+        val driving = drive?.visibility == View.VISIBLE
+        val left = if (driving) 0 else (panel?.width ?: 0) + m
+        val bottom = (if (driving) drive?.height ?: 0 else bar?.height ?: 0) + m
+        if (map.insetLeft != left || map.insetBottom != bottom) { map.insetLeft = left; map.insetBottom = bottom; map.invalidate() }
     }
 
     // ---- Compact: portrait ------------------------------------------------------------------
-    private fun buildCompact(root: LinearLayout) {
+    private fun buildCompact() {
+        val root = kit.column().apply { setBackgroundColor(Ui.BASE) }
+        setContentView(root)
         listScroll = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
-        root.addView(listScroll, lp(-1, 0, 1f))
-        val content = column().apply { setPadding(u(16f), u(20f), u(16f), u(16f)) }
+        root.addView(listScroll, kit.lp(-1, 0, 1f))
+        val content = kit.column().apply { setPadding(kit.u(16f), kit.u(20f), kit.u(16f), kit.u(16f)); clipToPadding = false }
         listScroll.addView(content)
-        content.addView(pageTitle); content.addView(pageSubtitle)
-        explore = column(); content.addView(explore)
-        explore.addView(buildMapCard(), lp(-1, u(200f)) { topMargin = u(16f) })
-        explore.addView(buildSources(), lp(-1, -2) { topMargin = u(12f) })
-        explore.addView(sourceText, lp(-1, -2) { topMargin = u(8f) })
-        content.addView(buildListHeader(), lp(-1, -2) { topMargin = u(24f) })
-        content.addView(buildFilters(), lp(-1, -2) { topMargin = u(12f) })
-        content.addView(tracks, lp(-1, -2) { topMargin = u(12f) })
-        content.addView(messageText)
+        val head = kit.row()
+        head.addView(eyebrow, kit.lp(0, -2, 1f))
+        head.addView(voice, kit.lp(kit.u(40f), kit.u(40f)))
+        content.addView(head)
+        content.addView(placeTitle, kit.lp(-1, -2) { topMargin = kit.u(4f) })
+        content.addView(contextText, kit.lp(-1, -2) { topMargin = kit.u(8f) })
+        content.addView(kit.laneRule(), kit.lp(kit.u(56f), kit.u(4f)) { topMargin = kit.u(16f) })
+        val exploring = kit.column()
+        val card = FrameLayout(this).apply { background = kit.shape(Ui.RAISED, 12f); clipToOutline = true }
+        map = MusicMapView(this).apply { scale = kit.s; zoom = 9 }
+        card.addView(map, FrameLayout.LayoutParams(-1, -1))
+        exploring.addView(card, kit.lp(-1, kit.u(220f)) { topMargin = kit.u(16f) })
+        exploring.addView(buildSources(), kit.lp(-1, -2) { topMargin = kit.u(12f) })
+        exploring.addView(sourceText, kit.lp(-1, -2) { topMargin = kit.u(8f) })
+        content.addView(exploring); explore = exploring
+        content.addView(buildFilters(), kit.lp(-1, -2) { topMargin = kit.u(20f) })
+        content.addView(tracks, kit.lp(-1, -2) { topMargin = kit.u(12f); leftMargin = -kit.u(8f); rightMargin = -kit.u(8f) })
+        content.addView(messageText, kit.lp(-1, -2) { topMargin = kit.u(12f) })
 
-        val mini = column().apply { background = shape(Ui.CARD, 8f); elevation = u(8f).toFloat(); setPadding(u(8f), u(8f), u(8f), u(6f)) }
-        val controls = row()
-        controls.addView(nowArt, lp(u(44f), u(44f)) { rightMargin = u(12f) })
-        controls.addView(songInfo(openPlayer = true), lp(0, -2, 1f))
-        playButton = circle(Icon.PLAY, 48f, Ui.ACCENT, Ui.ON_ACCENT, "재생", .42f) { command("play") }
-        controls.addView(playButton, lp(u(48f), u(48f)) { leftMargin = u(8f) })
+        val mini = floating(kit.column(), 12f).apply { setPadding(kit.u(8f), kit.u(8f), kit.u(8f), kit.u(8f)) }
+        val controls = kit.row()
+        controls.addView(nowArt, kit.lp(kit.u(44f), kit.u(44f)) { rightMargin = kit.u(12f) })
+        val info = kit.column().apply {
+            addView(currentText); addView(detailText, kit.lp(-1, -2) { topMargin = kit.u(4f) })
+            isFocusable = true; contentDescription = "재생 화면 열기"; setOnClickListener { showPlayer() }
+        }
+        controls.addView(info, kit.lp(0, -2, 1f))
+        controls.addView(playButton(48f), kit.lp(kit.u(48f), kit.u(48f)) { leftMargin = kit.u(8f) })
         mini.addView(controls)
-        mini.addView(progress, lp(-1, u(2f)) { topMargin = u(6f) })
-        root.addView(mini, lp(-1, -2) { setMargins(u(8f), u(4f), u(8f), u(4f)) })
+        mini.addView(progress, kit.lp(-1, kit.u(2f)) { topMargin = kit.u(8f) })
+        root.addView(mini, kit.lp(-1, -2) { setMargins(kit.u(8f), kit.u(4f), kit.u(8f), kit.u(4f)) })
 
-        val nav = row().apply { setPadding(u(16f), 0, u(16f), u(4f)) }
-        navButtons = navItems().onEach { nav.addView(it, lp(0, u(60f), 1f)) }
+        val nav = buildTabs().apply { setPadding(kit.u(8f), 0, kit.u(8f), kit.u(4f)) }
+        tabs.forEach { nav.addView(it, kit.lp(0, kit.u(52f), 1f)) }
         root.addView(nav)
     }
     private fun showPlayer() {
         if (wide || playerDialog?.isShowing == true) return
-        val body = column().apply { setPadding(u(24f), u(24f), u(24f), u(20f)) }
-        body.addView(text("지금 재생 중", T.SMALL_BOLD, Ui.TEXT_MUTED))
-        body.addView(albumArt(state.current?.let { Catalog.tracks.indexOf(it) } ?: 0, 8f), lp(-1, u(200f)) { topMargin = u(16f); bottomMargin = u(16f) })
-        dialogTitle = text("", T.TITLE); body.addView(dialogTitle)
-        (timeText.parent as? ViewGroup)?.removeView(timeText); body.addView(timeText, lp(-2, -2) { topMargin = u(4f) })
-        val controls = row().apply { gravity = Gravity.CENTER }
-        controls.addView(circle(Icon.PREV, 56f, Color.TRANSPARENT, Ui.TEXT_SOFT, "이전 곡", .42f) { command("previous") }, lp(u(56f), u(56f)))
-        dialogPlay = circle(Icon.PLAY, 72f, Ui.ACCENT, Ui.ON_ACCENT, "재생", .42f) { command("play") }
-        controls.addView(dialogPlay, lp(u(72f), u(72f)) { leftMargin = u(24f); rightMargin = u(24f) })
-        controls.addView(circle(Icon.NEXT, 56f, Color.TRANSPARENT, Ui.TEXT_SOFT, "다음 곡", .42f) { command("next") }, lp(u(56f), u(56f)))
-        body.addView(controls, lp(-1, -2) { topMargin = u(16f); bottomMargin = u(16f) })
-        val actions = row().apply { gravity = Gravity.CENTER }
-        (favorite.parent as? ViewGroup)?.removeView(favorite); actions.addView(favorite, lp(-2, u(48f)))
-        actions.addView(pill("재생 종료", Pill.DARK, Icon.STOP) { command("stop") }, lp(-2, u(48f)) { leftMargin = u(8f) })
-        body.addView(actions)
-        body.addView(pill("닫기", Pill.DARK) { playerDialog?.dismiss() }, lp(-1, u(48f)) { topMargin = u(12f) })
+        val body = kit.column().apply { setPadding(kit.u(24f), kit.u(24f), kit.u(24f), kit.u(20f)) }
+        body.addView(kit.text("지금 재생 중", T.CAPTION, Ui.TEXT_MUTED))
+        body.addView(kit.art(state.current, 12f), kit.lp(-1, kit.u(200f)) { topMargin = kit.u(16f); bottomMargin = kit.u(16f) })
+        dialogTitle = kit.text("", T.TITLE); body.addView(dialogTitle)
+        (timeText.parent as? ViewGroup)?.removeView(timeText); body.addView(timeText, kit.lp(-2, -2) { topMargin = kit.u(8f) })
+        val controls = kit.row().apply { gravity = Gravity.CENTER }
+        controls.addView(skipButton(Icon.PREV, 56f, "이전 곡", "previous"), kit.lp(kit.u(56f), kit.u(56f)))
+        val dialogPlay = playButton(72f)
+        controls.addView(dialogPlay, kit.lp(kit.u(72f), kit.u(72f)) { leftMargin = kit.u(24f); rightMargin = kit.u(24f) })
+        controls.addView(skipButton(Icon.NEXT, 56f, "다음 곡", "next"), kit.lp(kit.u(56f), kit.u(56f)))
+        body.addView(controls, kit.lp(-1, -2) { topMargin = kit.u(16f); bottomMargin = kit.u(16f) })
+        (favorite.parent as? ViewGroup)?.removeView(favorite); body.addView(favorite, kit.lp(-1, kit.u(48f)))
+        body.addView(kit.button("닫기", Tone.QUIET) { playerDialog?.dismiss() }, kit.lp(-1, kit.u(48f)) { topMargin = kit.u(8f) })
         playerDialog = android.app.AlertDialog.Builder(this).setView(body).create().apply {
-            setOnDismissListener { dialogTitle = null; dialogPlay = null }
-            show(); window?.setBackgroundDrawable(shape(Ui.SURFACE, 8f))
+            setOnDismissListener { dialogTitle = null; playButtons.remove(dialogPlay) }
+            show(); window?.setBackgroundDrawable(kit.shape(Ui.SURFACE, 16f, Ui.HAIRLINE))
         }
         render()
     }
@@ -363,80 +322,116 @@ class MainActivity : Activity() {
     // ---- Render -----------------------------------------------------------------------------
     private fun trackRow(track: Track): View {
         val current = state.current?.id == track.id
-        val favorite = track.id in state.favorites
-        val card = row().apply {
-            background = surface(if (current) Ui.CARD else Color.TRANSPARENT, 6f)
-            setPadding(u(8f), u(8f), u(12f), u(8f)); minimumHeight = u(72f)
+        val saved = track.id in state.favorites
+        val row = kit.row().apply {
+            background = kit.surface(if (current) Ui.CARD else Color.TRANSPARENT, 10f, if (current) Ui.HAIRLINE else null)
+            setPadding(kit.u(8f), kit.u(8f), kit.u(12f), kit.u(8f)); minimumHeight = kit.u(72f)
             isFocusable = true; contentDescription = "${track.title}, ${track.reason}, 재생"
             setOnClickListener { command("select", "id", track.id) }
         }
-        card.addView(albumArt(Catalog.tracks.indexOf(track)), lp(u(56f), u(56f)) { rightMargin = u(14f) })
-        val info = column()
-        info.addView(text(track.title, T.BODY_BOLD, if (current) Ui.ACCENT else Ui.TEXT).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-        info.addView(text("${Catalog.regions.first { it.id == track.regionId }.name} · ${track.genre}", T.CAPTION, Ui.TEXT_MUTED).apply { setPadding(0, u(2f), 0, 0) })
-        info.addView(text(track.reason, T.SMALL, Ui.TEXT_MUTED).apply { maxLines = if (wide) 1 else 2; ellipsize = TextUtils.TruncateAt.END; setPadding(0, u(2f), 0, 0) })
-        card.addView(info, lp(0, -2, 1f))
-        if (favorite) card.addView(ImageView(this).apply { setImageDrawable(IconDrawable(Icon.HEART_FILLED, Ui.ACCENT)); contentDescription = "보관함에 저장됨" }, lp(u(20f), u(20f)) { leftMargin = u(12f) })
-        if (current) card.addView(ImageView(this).apply { setImageDrawable(IconDrawable(if (state.playing) Icon.EQ else Icon.PAUSE, Ui.ACCENT)); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(u(22f), u(22f)) { leftMargin = u(12f) })
-        return card
+        row.addView(kit.art(track), kit.lp(kit.u(56f), kit.u(56f)) { rightMargin = kit.u(16f) })
+        val info = kit.column()
+        info.addView(kit.oneLine(kit.text(track.title, T.BODY_STRONG, if (current) Ui.ACCENT else Ui.TEXT)))
+        val place = Catalog.regions.firstOrNull { it.id == track.regionId }?.name
+        val detail = if (favoritesOnly && place != null) "$place · ${track.reason}" else track.reason
+        info.addView(kit.oneLine(kit.text(detail, T.CAPTION, Ui.TEXT_MUTED)), kit.lp(-1, -2) { topMargin = kit.u(4f) })
+        row.addView(info, kit.lp(0, -2, 1f))
+        if (saved) row.addView(ImageView(this).apply { setImageDrawable(IconDrawable(Icon.HEART_FILLED, Ui.TEXT_MUTED)); contentDescription = "보관함에 저장됨" }, kit.lp(kit.u(18f), kit.u(18f)) { leftMargin = kit.u(12f) })
+        if (current) row.addView(ImageView(this).apply { setImageDrawable(IconDrawable(if (state.playing) Icon.EQ else Icon.PAUSE, Ui.ACCENT)); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, kit.lp(kit.u(18f), kit.u(18f)) { leftMargin = kit.u(12f) })
+        return row
+    }
+    private fun emptyState(): View = kit.column().apply {
+        setPadding(kit.u(8f), kit.u(16f), kit.u(8f), kit.u(8f))
+        addView(kit.text(if (favoritesOnly) "아직 저장한 곡이 없어요" else "이 길에는 아직 음악이 없어요", T.BODY_STRONG, Ui.TEXT_SOFT))
+        addView(kit.text(if (favoritesOnly) "재생 중인 곡에서 저장을 누르면 여기에 모여요" else "서울 한강, 수원 화성, 용인 호수를 지나면\n그곳의 곡이 채워져요", T.CAPTION, Ui.TEXT_MUTED).apply { setLineSpacing(kit.u(4f).toFloat(), 1f) },
+            kit.lp(-1, -2) { topMargin = kit.u(8f) })
     }
     private fun render() {
-        pageTitle.text = if (favoritesOnly) "나의 음악 보관함" else "어디로 떠나볼까요?"
-        explore.visibility = if (favoritesOnly) View.GONE else View.VISIBLE
-        if (!wide) pageSubtitle.text = if (favoritesOnly) "저장한 곡을 한곳에서 다시 들어보세요." else "지금 있는 곳에서, 새로운 음악을 만나세요."
-        listTitle.text = if (favoritesOnly) "저장한 음악" else "이곳의 사운드"
-        navButtons.forEachIndexed { i, b ->
-            val active = i < 2 && favoritesOnly == (i == 1)
-            val color = if (active) Ui.TEXT else Ui.TEXT_MUTED
-            b.setTextColor(color); b.typeface = weight(if (active) 700 else 400)
-            (b.compoundDrawables[1] as? IconDrawable)?.color = color
-            b.background = surface(if (active && wide) Ui.RAISED else Color.TRANSPARENT, 8f)
+        val region = state.region
+        val current = state.current
+        val driving = wide && restricted
+        if (driveShown != driving) {
+            driveShown = driving
+            listOfNotNull(panel, bar, zoom).forEach { it.visibility = if (driving) View.GONE else View.VISIBLE }
+            drive?.visibility = if (driving) View.VISIBLE else View.GONE
+            if (wide) syncMapInsets()
         }
-        regionText.text = state.region?.name ?: "나의 음악 지도"
-        sourceText.text = "●  ${state.source}"
-        map.point = state.point; map.regionId = state.region?.id; map.invalidate()
-        jump.visibility = if (state.demo && !favoritesOnly && !restricted) View.VISIBLE else View.GONE
-        genres.forEach { stylePill(it, if (it.text.toString() == state.genre) Pill.ACCENT else Pill.DARK); it.typeface = weight(if (it.text.toString() == state.genre) 700 else 400) }
+        eyebrow.text = if (favoritesOnly) "보관함" else "지금 지나는 곳"
+        placeTitle.text = if (favoritesOnly) "저장한 음악" else region?.name ?: "어디로 갈까요"
+        explore?.visibility = if (favoritesOnly) View.GONE else View.VISIBLE
+        if (wide) { sources.visibility = if (favoritesOnly) View.GONE else View.VISIBLE }
+        tabs.forEachIndexed { i, tab ->
+            val active = i < 2 && favoritesOnly == (i == 1)
+            tab.setTextColor(if (active) Ui.TEXT else Ui.TEXT_MUTED); tab.typeface = kit.weight(if (active) 600 else 400)
+        }
+        routeButton.visibility = if (state.demo) View.GONE else View.VISIBLE
+        jump.visibility = if (state.demo) View.VISIBLE else View.GONE
+        (voice.drawable as? IconDrawable)?.icon = if (state.voiceOn) Icon.VOICE else Icon.VOICE_OFF
+        voice.contentDescription = if (state.voiceOn) "음성 안내 켜짐" else "음성 안내 꺼짐"
+        map.point = state.point; map.regionId = region?.id; map.invalidate()
+        genres.forEach { kit.tone(it, if (it.text.toString() == state.genre) Tone.SELECTED else Tone.QUIET) }
+
         val list = if (favoritesOnly) Catalog.tracks.filter { it.id in state.favorites && (state.genre == "전체" || it.genre == state.genre) } else state.recommendations
-        val listKey = list.joinToString { it.id } + state.current?.id + state.playing + state.favorites.sorted().joinToString() + favoritesOnly
+        contextText.text = when {
+            favoritesOnly -> if (list.isEmpty()) "" else "${list.size}곡"
+            state.drive.line.isNotBlank() -> state.drive.line
+            region != null -> "이곳에 어울리는 곡 ${list.size}곡"
+            else -> "현재 위치를 켜거나 경로를 둘러보세요"
+        }
+        val waiting = state.point == null && !state.demo
+        sourceText.text = if (favoritesOnly || (waiting && state.source == "위치 수신 대기")) "" else state.source
+        sourceText.visibility = if (sourceText.text.isEmpty()) View.GONE else View.VISIBLE
+
+        filterBar.visibility = if (favoritesOnly || region != null) View.VISIBLE else View.GONE
+        val listKey = list.joinToString { it.id } + current?.id + state.playing + state.favorites.sorted().joinToString() + favoritesOnly + (state.point != null)
         if (listKey != renderedList) {
             renderedList = listKey; tracks.removeAllViews()
-            if (list.isEmpty()) {
-                val empty = column().apply { background = shape(Ui.RAISED, 8f); setPadding(u(24f), u(24f), u(24f), u(24f)) }
-                empty.addView(text(if (favoritesOnly) "좋아하는 음악을 모아보세요" else "여행의 시작에 음악을 더해요", T.HEADING).apply { typeface = weight(700) })
-                empty.addView(text(if (favoritesOnly) "재생 중인 곡에서 저장을 누르면 여기에 담겨요." else "현재 위치를 켜거나 경로를 둘러보세요.\n서울·수원·용인의 시연곡을 만날 수 있어요.", T.CAPTION, Ui.TEXT_MUTED).apply { setPadding(0, u(8f), 0, 0) })
-                tracks.addView(empty)
-            }
-            list.forEach { tracks.addView(trackRow(it), lp(-1, -2) { bottomMargin = u(4f) }) }
+            if (list.isEmpty() && (favoritesOnly || state.point != null)) tracks.addView(emptyState())
+            list.forEach { tracks.addView(trackRow(it), kit.lp(-1, -2) { bottomMargin = kit.u(4f) }) }
         }
-        messageText.text = if (restricted) "주행 중에는 목록·지도 조작을 제한합니다" else state.message
-        messageText.setTextColor(if (restricted) Ui.WARNING else Ui.TEXT_MUTED)
+        caption?.let {
+            it.text = state.caption; it.visibility = if (state.caption.isEmpty()) View.GONE else View.VISIBLE
+            (it.layoutParams as FrameLayout.LayoutParams).let { lp ->
+                val start = if (driving) kit.u(16f) else (panel?.layoutParams?.width ?: 0) + kit.u(32f)
+                if (lp.leftMargin != start) { lp.leftMargin = start; it.requestLayout() }
+            }
+        }
+        messageText.text = if (restricted && !wide) "주행 중에는 목록과 지도 조작을 쉬어요" else if (!wide && state.caption.isNotEmpty()) state.caption else state.message
+        messageText.visibility = if (messageText.text.isEmpty()) View.GONE else View.VISIBLE
         fun enableControls(view: View) {
             view.isEnabled = !restricted
             if (view is ViewGroup) for (i in 0 until view.childCount) enableControls(view.getChildAt(i))
         }
         parkedControls.forEach { enableControls(it); it.alpha = if (restricted) .4f else 1f }
         for (i in 0 until tracks.childCount) tracks.getChildAt(i).isEnabled = !restricted
-        val current = state.current
+
         if (nowArtFor != current?.id) {
             nowArtFor = current?.id; nowArt.removeAllViews()
-            nowArt.addView(if (current == null) View(this).apply { background = shape(Ui.RAISED, 4f) } else albumArt(Catalog.tracks.indexOf(current)), FrameLayout.LayoutParams(-1, -1))
+            nowArt.addView(kit.art(current), FrameLayout.LayoutParams(-1, -1))
         }
-        currentText.text = current?.title ?: "오늘의 첫 곡을 찾아보세요"
-        detailText.text = current?.let { if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · ${it.genre}" } ?: "음악을 선택하면 여기에 표시돼요"
-        listOfNotNull(playButton, dialogPlay).forEach {
+        currentText.text = current?.title ?: "재생 중인 곡이 없어요"
+        val artistLine = current?.let { if (state.buffering) "재생 준비 중 · ${it.artist}" else "${it.artist} · ${it.genre}" }
+        detailText.text = artistLine ?: "곡을 고르면 여기에서 이어집니다"
+        drivePlace?.text = region?.name ?: "길 위의 음악"
+        driveTitle?.text = current?.title ?: "재생 버튼을 누르면 이 길의 곡이 시작돼요"
+        driveDetail?.text = listOfNotNull(artistLine, state.drive.line.takeIf { it.isNotBlank() }).joinToString("  ·  ")
+        driveDetail?.visibility = if (driveDetail?.text.isNullOrEmpty()) View.GONE else View.VISIBLE
+        playButtons.forEach {
             (it.drawable as? IconDrawable)?.icon = if (state.playing || state.buffering) Icon.PAUSE else Icon.PLAY
             it.contentDescription = if (state.playing || state.buffering) "일시정지" else "재생"
         }
-        dialogTitle?.text = current?.title ?: "음악을 선택해 주세요"
+        dialogTitle?.text = current?.title ?: "곡을 골라 주세요"
         val saved = current?.id in state.favorites
-        favorite.text = if (saved) "저장됨" else "저장"
-        (favorite.compoundDrawables[0] as? IconDrawable)?.let { it.icon = if (saved) Icon.HEART_FILLED else Icon.HEART; it.color = if (saved) Ui.ACCENT else Ui.TEXT }
-        favorite.contentDescription = if (saved) "보관함에 저장됨" else "보관함에 저장"
+        val favoriteLabel = if (saved) "저장됨" else "저장"
+        if (favorite.contentDescription != favoriteLabel) {
+            kit.icon(favorite)?.icon = if (saved) Icon.HEART_FILLED else Icon.HEART
+            kit.label(favorite, favoriteLabel)
+        }
+        favorite.contentDescription = favoriteLabel
         favorite.isEnabled = current != null && current.appleMusicId == null && !current.id.startsWith("apple:") && !restricted
         favorite.alpha = if (favorite.isEnabled) 1f else .4f
         progress.progress = (1000L * state.positionMs / state.durationMs.coerceAtLeast(1)).toInt()
         fun clock(ms: Int) = "%d:%02d".format(ms / 60000, ms / 1000 % 60)
-        timeText.text = "${clock(state.positionMs)} / ${clock(state.durationMs)}"
+        timeText.text = if (current == null) "" else "${clock(state.positionMs)} / ${clock(state.durationMs)}"
     }
 }

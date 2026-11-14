@@ -1,8 +1,7 @@
 # 길 위의 음악 — 차량용 음악 지도 프로토타입
 
-현대자동차그룹 공모전용 Kotlin Android 프로젝트. WayVibe의 위치 기반 음악 경험과
-RoadyGoat의 지역 추천·지도 표현을 참고해 필요한 동작을 새로 구현했습니다.
-추출된 WayVibe Java 코드나 타 앱의 브랜드·이미지·SDK 토큰을 복사하지 않습니다.
+현대자동차그룹 공모전용 Kotlin Android 프로젝트입니다. 차가 지나는 곳과 주행 상황(와이퍼, 드라이브 모드)을 읽어
+그 길에 어울리는 곡을 이어 틀고, 바뀐 이유를 음성으로 알려 줍니다. 제출용 안내는 [저장소 README](../README.md)에 있습니다.
 
 ## 현재 동작
 
@@ -16,7 +15,10 @@ RoadyGoat의 지역 추천·지도 표현을 참고해 필요한 동작을 새�
 - 즐겨찾기 로컬 저장, 장르 필터
 - AAOS CarUxRestrictions 수신: 제한 활성화 또는 상태 확인 실패 시 목록·필터·지도 조작 제한
 - 일반 Android 위치와 Pleos FusedLocation을 소스 세트로 분리
-- Apple Music 계정 연결·검색·보관함 조회·앱 내부 전체 곡 재생 연동 코드 (공식 SDK·개발자 토큰 설정 필요)
+- Pleos Vehicle SDK: 앞 유리 와이퍼·드라이브 모드에 따라 추천 순서 변경(숨기지 않고 순서만 바꿈)
+- Pleos TextToSpeech SDK(온디바이스): 지역 진입·분위기 변화 음성 안내, 화면 자막 동시 표시, 안내 중 음악 음량 낮춤
+- 주행 제한 시 목록·지도 조작 대신 지역명·곡·재생 버튼만 남기는 주행 화면
+- Apple Music: 개발자 토큰만으로 카탈로그 검색·앨범 커버·30초 미리듣기 동작. 계정 연결·보관함·전체 곡 재생은 연동 코드만 있음(공식 SDK 필요, 미검증)
 
 **추천 데이터와 음원은 시연용입니다.** 전국 상용 음악 데이터나 실제 아티스트 추천이 아닙니다.
 Apple Music 인증·전체 곡 스트리밍 연동 코드는 추가했으며, 공식 SDK와 개발자 토큰을 별도로 설정해야 합니다.
@@ -43,6 +45,7 @@ Pleos 설치와 점검 절차는 [Pleos 실행 가이드](docs/PLEOS.md)를 참�
 Android Studio에서 **이 car-app 폴더**를 프로젝트로 엽니다.
 JDK 17 이상(검증 환경 JDK 21), Android SDK 34, 인터넷이 필요합니다.
 `local.properties`에 각 PC의 `sdk.dir`를 설정합니다. 이 파일은 Git에 포함하지 않습니다.
+macOS·Linux에서는 `./gradlew`로 같은 작업을 실행합니다.
 
 ```powershell
 .\gradlew.bat :app:assembleStandardDebug
@@ -91,13 +94,15 @@ python tools/smoke_test.py --adb PATH_TO_ADB
 | `PlaybackService.kt` | 실제 재생, 미디어 탐색·세션, 위치 수명주기, 시연 이동 |
 | `PositionSource.kt` | 좌표 수신 인터페이스와 Android 구현 |
 | `src/pleos/.../PositionFactory.kt` | 공식 Pleos 위치 SDK 구현 |
-| `MainActivity.kt` | 가로(차량: 내비 레일·지도·목록·하단 재생 바) / 세로(지도·목록·미니 플레이어·하단 탭) 반응형 화면 |
-| `DesignSystem.kt` | 다크 디자인 토큰(색·액센트)과 벡터 아이콘 |
+| `MainActivity.kt` | 가로(차량: 전체 지도 위 장소 패널·재생 바, 주행 화면) / 세로(장소 머리글·지도·목록·미니 플레이어·탭) |
+| `DesignSystem.kt` | 디자인 토큰(그래파이트 무채색 + 차선 노란색 액센트), 선 아이콘, 장소별 커버 그림 |
+| `UiKit.kt` | 화면 공용 부품(간격·타입·버튼·탭) |
+| `Drive.kt` | 차량 신호·음성 안내 인터페이스와 일반 Android 음성 구현 |
+| `src/pleos/.../DriveFactory.kt` | Pleos Vehicle·TextToSpeech SDK 구현 |
 | `MusicMapView.kt` | OSM 타일 지도, 지역 핀과 현재 좌표 |
 | `CarUxGuard.kt` | AAOS 주행 UX 제한 수신 |
 
 공통 추천·지역 로직은 Android UI와 분리돼 있습니다.
-기존 `roadygoat.js`, `roadygoat-out`, `wayvibe-jadx`는 수정하지 않습니다.
 
 ## 대회 제출까지 남은 작업
 
@@ -107,9 +112,9 @@ python tools/smoke_test.py --adb PATH_TO_ADB
    FusedLocation 코드가 컴파일된다는 사실만으로 차량 위치 접근 승인·실행을 보장하지 않습니다.
 3. 음원 공급 방식과 사용 권한을 확정하고 시연 카탈로그를 실제 지역·음악 데이터로 교체합니다.
 4. 차량 카테고리·미디어 센터 노출·주행 UX 심사를 확인합니다.
-   `distractionOptimized`는 실차 검증 전 선언하지 않았습니다. 차량이 주행 중 Activity를 차단할 수 있습니다.
+   주행 화면을 만들면서 `distractionOptimized`를 선언했습니다. 실차 주행 상태 전환은 아직 검증하지 못했습니다.
 5. 앱 이름·패키지명 확정, 본인 릴리스 서명 키로 서명, 실행 가능한 release APK와 기획서·시연 영상 준비.
-   현재 자동 생성하는 debug APK는 개발용이며 최종 제출용 서명 APK가 아닙니다.
+   release 서명 설정을 추가했습니다(`local.properties`의 `release.*`). 서명 키는 Git에 올리지 않으며 팀에서 보관해야 합니다.
 
 ## 확인한 공식 문서
 

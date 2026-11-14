@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <!-- Vehicle SDK: driving mode and front wiper state set the listening mood. -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+    <!-- TextToSpeech SDK: spoken guidance when the place or the mood changes. -->
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
     <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
 </manifest>

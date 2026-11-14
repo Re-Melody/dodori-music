@@ -33,6 +33,16 @@ class CatalogTest {
         assertEquals(Catalog.regions.last().point, Catalog.routePoint(1.0))
         assertEquals(Catalog.regions.last().point, Catalog.routePoint(2.0))
     }
+    @Test fun driveMoodReordersWithoutHidingTracks() {
+        val plain = Catalog.recommend("suwon")
+        val rainy = Catalog.recommend("suwon", mood = DriveContext(rain = true).mood)
+        val sporty = Catalog.recommend("suwon", mood = DriveContext(mode = DriveMode.SPORT).mood)
+        assertEquals(plain.toSet(), rainy.toSet())
+        assertEquals(Catalog.CALM, rainy.first().genre)
+        assertEquals(Catalog.LIVELY, sporty.first().genre)
+        assertNull(DriveContext().mood)
+        assertEquals(Catalog.CALM, DriveContext(rain = true, mode = DriveMode.SPORT).mood)
+    }
     @Test fun hysteresisKeepsThePreviousRegionNearItsBoundary() {
         val region = Catalog.regions.first()
         val justOutside = GeoPoint(region.point.lat + (region.radiusKm + .4) / 111.195, region.point.lon)

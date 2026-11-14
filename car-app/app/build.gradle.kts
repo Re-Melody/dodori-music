@@ -18,12 +18,28 @@ android {
         applicationId = "com.musicmap.car"
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "com.musicmap.car.SmokeInstrumentation"
         buildConfigField("String", "APPLE_MUSIC_DEVELOPER_TOKEN", quoted(appleDeveloperToken))
     }
     buildFeatures { buildConfig = true }
+    // Release signing reads a keystore that stays outside Git (see README). Without it the release build is unsigned.
+    val releaseStore = musicProperties.getProperty("release.storeFile")?.let { rootProject.file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseStore != null) create("release") {
+            storeFile = releaseStore
+            storePassword = musicProperties.getProperty("release.storePassword")
+            keyAlias = musicProperties.getProperty("release.keyAlias")
+            keyPassword = musicProperties.getProperty("release.keyPassword")
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (releaseStore != null) signingConfig = signingConfigs.getByName("release")
+        }
+    }
     flavorDimensions += "platform"
     productFlavors {
         create("standard") { dimension = "platform" }
@@ -39,5 +55,7 @@ dependencies {
     // Apple distributes MusicKit through its signed-in developer download, not Maven Central.
     implementation(fileTree("libs/musickit") { include("*.aar", "*.jar") })
     "pleosImplementation"("ai.pleos.playground:FusedLocation:1.1.3")
+    "pleosImplementation"("ai.pleos.playground:Vehicle:2.3.2")
+    "pleosImplementation"("ai.pleos.playground:TextToSpeech:3.3.1")
     testImplementation("junit:junit:4.13.2")
 }
