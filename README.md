@@ -1,4 +1,4 @@
-# 길 위의 음악
+# MoveMe
 
 차가 지금 지나는 곳과 주행 상황을 읽어, 그 길에 어울리는 음악을 알아서 이어 틀어 주는 Pleos Connect 차량용 음악 앱입니다.
 현대자동차그룹 차량용 앱 개발 공모전 출품작입니다.
@@ -58,7 +58,7 @@ Windows에서는 `car-app/run.ps1`이 에뮬레이터 실행부터 설치까지 
 
 ## APK
 
-- 위치: [`apk/ReMelody_길위의음악_release.apk`](apk/ReMelody_길위의음악_release.apk) (Pleos 변형, release 서명)
+- 위치: [`apk/ReMelody_MoveMe_release.apk`](apk/ReMelody_MoveMe_release.apk) (Pleos 변형, release 서명)
 - 직접 만들기: `car-app/local.properties`에 `release.storeFile`, `release.storePassword`, `release.keyAlias`, `release.keyPassword`를 적고 `./gradlew :app:assemblePleosRelease`
 
 ## 더 보기
