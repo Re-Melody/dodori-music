@@ -58,8 +58,8 @@ class AppleMusicRepository(private val app: MusicMapApplication) {
         loadSongs("place:${region.id}", region.songIds, region.keyword, 6, onLoaded) { it.copy(regionId = region.id, genre = Catalog.POPULAR) }
     /** A couple of catalog songs that suit the current weather. */
     fun weatherSongs(keyword: String): List<Track>? = songCache["weather:$keyword"]
-    fun loadWeatherSongs(keyword: String, onLoaded: () -> Unit) =
-        loadSongs("weather:$keyword", emptyList(), keyword, 2, onLoaded) { it.copy(regionId = Catalog.WEATHER_PICK, genre = Catalog.WEATHER) }
+    fun loadWeatherSongs(keyword: String, ids: List<String>, onLoaded: () -> Unit) =
+        loadSongs("weather:$keyword", ids, "", 2, onLoaded) { it.copy(regionId = Catalog.WEATHER_PICK, genre = Catalog.WEATHER) }
 
     /** Loads once per session and key; [onLoaded] runs on the main thread when new songs arrive. */
     private fun loadSongs(key: String, ids: List<String>, keyword: String, limit: Int, onLoaded: () -> Unit, label: (Track) -> Track) {

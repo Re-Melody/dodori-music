@@ -95,6 +95,12 @@ class CatalogTest {
         assertEquals("비 오는 날", DriveContext(rain = true, weather = Weather(Sky.CLEAR)).songKeyword)
         assertNull(DriveContext(weather = Weather(Sky.CLOUDY)).songKeyword)
         assertTrue(DriveContext(weather = Weather(Sky.SNOW)).line.isNotBlank())
+        // Every kind of weather that names a pick set also has songs chosen for it, and nothing else does.
+        listOf(Sky.RAIN, Sky.SNOW, Sky.FOG, Sky.CLEAR, Sky.CLOUDY).forEach { sky ->
+            val context = DriveContext(weather = Weather(sky))
+            assertEquals(context.songKeyword != null, context.weatherSongIds.isNotEmpty())
+        }
+        assertTrue(Catalog.segments.all { it.keyword.isEmpty() && it.songIds.isNotEmpty() })
     }
     @Test fun hysteresisKeepsThePreviousRegionNearItsBoundary() {
         val region = Catalog.regions.first()

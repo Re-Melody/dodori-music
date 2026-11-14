@@ -34,6 +34,8 @@ class AppleMusicActivity : Activity() {
     /** Set when the screen was opened to pick the driver's own song for a segment instead of playing one. */
     private val assignTo: MusicRegion? by lazy { Catalog.segments.find { it.id == intent.getStringExtra("assign") } }
     private var unassign: Button? = null
+    /** The first library load waits until the vehicle says browsing is allowed; on a car that answer arrives after onCreate. */
+    private var firstLoadPending = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +46,7 @@ class AppleMusicActivity : Activity() {
         buildUi()
         if (packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)) {
             restricted = true
-            guard = CarUxGuard(this) { value -> runOnUiThread { restricted = value; renderState() } }
+            guard = CarUxGuard(this) { value -> runOnUiThread { restricted = value; firstLoad(); renderState() } }
         }
         renderState()
         // Debug builds only: accept a Music User Token obtained outside the app (MusicKit on the web).
@@ -59,7 +61,7 @@ class AppleMusicActivity : Activity() {
                     .onFailure { feedback.text = failureMessage(it) }
                 renderState()
             }
-        } else if (repository.connected && !signingIn) loadLibrary()
+        } else if (repository.connected && !signingIn) { firstLoadPending = true; firstLoad() }
         else if (!restricted && repository.catalogReady) feedback.text = "곡이나 아티스트를 검색하면 30초 미리듣기로 바로 들을 수 있어요"
         renderState()
     }
@@ -161,6 +163,12 @@ class AppleMusicActivity : Activity() {
     private fun search() {
         if (query.text.toString().isBlank()) { feedback.text = "검색할 곡이나 아티스트를 입력해 주세요."; return }
         fetch { callback -> repository.search(query.text.toString(), callback) }
+    }
+    private fun firstLoad() {
+        if (!firstLoadPending || restricted || busy || signingIn || !repository.connected) return
+        firstLoadPending = false
+        val words = if (BuildConfig.DEBUG) intent.getStringExtra("query") else null
+        if (words.isNullOrBlank()) loadLibrary() else { query.setText(words); search() }
     }
     private fun loadLibrary() = fetch { callback -> repository.library(callback) }
     private fun fetch(append: Boolean = false, request: ((Result<AppleMusicPage>) -> Unit) -> Unit) {
