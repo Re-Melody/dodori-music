@@ -31,14 +31,16 @@ object Catalog {
     const val WEATHER_PICK = "weather"
     private const val ARTIST = "MoveMe"
     val regions = listOf(
-        MusicRegion("seoul", "서울 · 한강", GeoPoint(37.525, 126.938), 12.0, "서울 한강", "강변을 따라 달리기 좋은 곡을 골랐어요", "한강", songIds = listOf("1610730837")),
-        MusicRegion("suwon", "수원 · 화성", GeoPoint(37.286, 127.012), 8.0, "수원 화성", "성곽길에 어울리는 곡으로 이어갈게요", "수원", songIds = listOf("1477149763")),
-        MusicRegion("yongin", "용인 · 호수", GeoPoint(37.241, 127.177), 10.0, "용인 호수", "호숫가 풍경에 맞는 곡을 틀어 드릴게요", "호수", songIds = listOf("1735701751"))
+        MusicRegion("seoul", "서울 · 한강", GeoPoint(37.525, 126.938), 12.0, "서울 한강", "강변을 따라 달리기 좋은 곡을 골랐어요",
+            songIds = listOf("1688543309", "1607289319", "1267207255", "1610730837")),
+        MusicRegion("suwon", "수원 · 화성", GeoPoint(37.286, 127.012), 8.0, "수원 화성", "성곽길에 어울리는 곡으로 이어갈게요", songIds = listOf("1477149763")),
+        MusicRegion("yongin", "용인 · 호수", GeoPoint(37.241, 127.177), 10.0, "용인 호수", "호숫가 풍경에 맞는 곡을 틀어 드릴게요", songIds = listOf("1735701751"))
     )
     /**
      * Roads with a song of their own. Coordinates are from OpenStreetMap; song ids are Apple Music (KR) catalog ids,
      * looked up once when this table was written. Nothing here is generated at run time.
-     * Roads have no search keyword: a road plays only the songs chosen for it, never loosely related search results.
+     * No segment uses a search keyword any more: a place plays only the songs chosen for it, because search
+     * results for a place name drift toward whatever shares the word (the Han river list filled up with rap megamixes).
      */
     val roads = listOf(
         MusicRegion("gangnam", "강남대로", GeoPoint(37.4979, 127.0276), 1.5, "강남대로", "강남 하면 떠오르는 그 곡이에요",
@@ -142,10 +144,19 @@ data class DriveContext(val rain: Boolean = false, val mode: DriveMode = DriveMo
         sky == Sky.CLEAR -> if (weather?.isDay != false) "날이 맑네요. 경쾌한 곡부터 틀게요" else "맑은 밤이에요. 차분한 곡부터 이어갈게요"
         else -> null
     }
-    /** Search words for catalog songs that suit the weather; a fixed table, not generated. */
+    /** Catalog songs chosen in advance for each kind of weather (Apple Music KR ids). */
+    val weatherSongIds: List<String> get() = when {
+        sky == Sky.RAIN -> listOf("1569744098", "1732912110")       // 헤이즈 「비도 오고 그래서」, 폴킴 「비」
+        sky == Sky.SNOW -> listOf("1569425907", "1320693447")       // 에일리 「첫눈처럼 너에게 가겠다」, Zion.T 「눈」
+        sky == Sky.FOG -> listOf("1598796424")                      // 정훈희 「안개」
+        sky == Sky.CLEAR -> if (weather?.isDay != false) listOf("1550539052") else listOf("1219218446") // 볼빨간사춘기 「여행」 / 아이유 「밤편지」
+        else -> emptyList()
+    }
+    /** Name of the weather pick set, used as its cache key and in tests. */
     val songKeyword: String? get() = when {
         sky == Sky.RAIN -> "비 오는 날"
         sky == Sky.SNOW -> "눈 오는 날"
+        sky == Sky.FOG -> "안개 낀 날"
         sky == Sky.CLEAR -> if (weather?.isDay != false) "드라이브" else "밤 드라이브"
         else -> null
     }

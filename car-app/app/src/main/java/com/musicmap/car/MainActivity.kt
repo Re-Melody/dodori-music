@@ -98,6 +98,12 @@ class MainActivity : Activity() {
             intent.removeExtra("mut")
             startActivity(Intent(this, AppleMusicActivity::class.java).putExtra("mut", it))
         }
+        // Debug builds only: open the Apple Music screen with a search already entered (touch typing is unreliable on emulators).
+        if (BuildConfig.DEBUG) intent.getStringExtra("apple_query")?.let { words ->
+            val assign = intent.getStringExtra("apple_assign")
+            intent.removeExtra("apple_query"); intent.removeExtra("apple_assign")
+            startActivity(Intent(this, AppleMusicActivity::class.java).putExtra("query", words).apply { if (assign != null) putExtra("assign", assign) })
+        }
     }
     override fun onStart() { super.onStart(); state.listeners.add(update); render() }
     override fun onStop() { state.listeners.remove(update); super.onStop() }

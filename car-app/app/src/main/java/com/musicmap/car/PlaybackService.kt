@@ -316,7 +316,7 @@ class PlaybackService : MediaBrowserService() {
         state.recommendations = (hereSongs.take(2) + weatherSongs + hereSongs.drop(2) + ahead.flatMap { songsFor(it, 1) }).distinctBy { it.id }
         val reload = { refreshRecommendations(); publish() }
         (listOfNotNull(here) + ahead).forEach { segment -> appleMusic.loadRegionSongs(segment) { reload() } }
-        weatherWords?.let { words -> appleMusic.loadWeatherSongs(words) { if (state.drive.songKeyword == words) reload() } }
+        weatherWords?.let { words -> appleMusic.loadWeatherSongs(words, state.drive.weatherSongIds) { if (state.drive.songKeyword == words) reload() } }
         if (isSearchPick(state.current)) {
             notifyChildrenChanged("nearby"); return
         }
